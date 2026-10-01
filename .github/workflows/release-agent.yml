@@ -31,6 +31,26 @@ jobs:
           $version = '${{ github.ref_name }}'.TrimStart('v')
           dotnet publish src/MonitorKing.Agent -c Release -r win-x64 --self-contained true -p:Version=$version -o out/MonitorKing-Agent
 
+      # L'agent publié (autonome) n'embarque pas forcément les mêmes composants que celui de développement :
+      # on le lance pour de vrai et on interroge quelques routes avant de publier quoi que ce soit.
+      - name: Tester l'agent publié (démarre et répond)
+        shell: pwsh
+        run: |
+          $agent = Start-Process out/MonitorKing-Agent/MonitorKing.Agent.exe -PassThru -ArgumentList '--MonitorKing:Port=5799', "--MonitorKing:DataDirectory=$env:RUNNER_TEMP/mk-test"
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
+              Start-Sleep -Milliseconds 500
+              try { $ready = (Invoke-WebRequest -UseBasicParsing http://localhost:5799/api/info).StatusCode -eq 200 } catch { }
+            }
+            if (-not $ready) { throw "L'agent publié ne répond pas sur /api/info" }
+            foreach ($path in '/', '/api/privacy', '/api/events', '/api/breakdown?resource=cpu&minutes=30') {
+              $code = (Invoke-WebRequest -UseBasicParsing "http://localhost:5799$path").StatusCode
+              Write-Host "$path -> $code"
+            }
+          }
+          finally { Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue }
+
       - name: Ajouter le script d'inscription et zipper
         shell: pwsh
         run: |
