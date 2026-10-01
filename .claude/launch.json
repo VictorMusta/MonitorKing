@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "monitorking-agent",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/MonitorKing.Agent/MonitorKing.Agent.csproj"],
+      "port": 5757
+    }
+  ]
+}

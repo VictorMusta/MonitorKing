@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MonitorKing</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232a78d6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 17h18l-1.6-10-4.6 4.2L12 5l-2.8 6.2L4.6 7z'/%3E%3Cline x1='4' y1='21' x2='20' y2='21'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    try {
+      const theme = localStorage.getItem('mk-theme');
+      if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    } catch { /* stockage indisponible */ }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row">
+      <a class="brand" href="#accueil" aria-label="MonitorKing, accueil">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17h18l-1.6-10-4.6 4.2L12 5l-2.8 6.2L4.6 7z"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
+        <b>MonitorKing</b>
+      </a>
+      <div class="machine"><strong id="machine-name">…</strong><span id="machine-os"></span></div>
+      <span class="topbar-spacer"></span>
+      <span class="pill" title="L'agent observe seulement : aucune action sur ce PC n'est possible depuis ce tableau de bord.">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        Lecture seule
+      </span>
+      <span class="pill" id="live" aria-live="polite"><span class="live-dot"></span><span>Connexion…</span></span>
+      <button class="icon-btn" id="theme" type="button" aria-label="Changer de thème"></button>
+    </div>
+    <nav class="tabs" id="tabs" aria-label="Sections"></nav>
+  </header>
+
+  <main><div class="skeleton">Connexion à l'agent…</div></main>
+  <footer class="footer" id="footer"></footer>
+
+  <dialog id="widget-dialog"></dialog>
+  <dialog id="status-dialog"></dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
