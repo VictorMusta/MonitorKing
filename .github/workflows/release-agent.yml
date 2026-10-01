@@ -34,7 +34,7 @@ jobs:
       - name: Ajouter le script d'inscription et zipper
         shell: pwsh
         run: |
-          Copy-Item deploy/agent/inscription.cmd out/MonitorKing-Agent/
+          Copy-Item deploy/agent/inscription.cmd, deploy/agent/demarrage-windows.cmd, deploy/agent/demarrage-windows.ps1 out/MonitorKing-Agent/
           Compress-Archive -Path out/MonitorKing-Agent -DestinationPath "MonitorKing-Agent-${{ github.ref_name }}-win-x64.zip"
 
       - name: Créer la release
@@ -51,6 +51,8 @@ jobs:
              Windows peut afficher « Windows a protégé votre ordinateur » (exécutable non signé) :
              Informations complémentaires → Exécuter quand même.
           3. Le tableau de bord local s'ouvre sur http://localhost:5757.
+          4. Facultatif : demarrage-windows.cmd installe l'agent dans Program Files et le lance à chaque
+             ouverture de session avec les droits administrateur (températures du processeur).
 
           Par défaut, les noms des applications partent sous pseudonyme (mode discret).
           "@

@@ -13,6 +13,14 @@ dotnet run --project src/MonitorKing.Agent
 
 Puis ouvrir <http://localhost:5757>. Prérequis : SDK .NET 8, Windows 10/11. Les droits administrateur ne sont pas nécessaires. En administrateur, avec le pilote [PawnIO](https://pawnio.eu) installé, l'agent lit aussi les températures du processeur et de la carte mère.
 
+### Lancer l'agent au démarrage de Windows
+
+```bash
+dotnet publish src/MonitorKing.Agent -c Release -r win-x64 --self-contained true -o out/MonitorKing-Agent
+```
+
+Copier `deploy/agent/demarrage-windows.cmd` et `demarrage-windows.ps1` dans `out/MonitorKing-Agent` (ils sont déjà dans le zip des releases), puis double-cliquer sur `demarrage-windows.cmd`. Après confirmation de Windows, le script copie l'agent dans `C:\Program Files\MonitorKing` et crée la tâche planifiée « MonitorKing ». L'agent se lance alors à chaque ouverture de session, en administrateur et sans fenêtre (build Release). `demarrage-windows.cmd /desinstaller` retire tout sauf les données. Pour développer avec `dotnet run`, arrêter d'abord l'agent installé, qui occupe le port 5757.
+
 ## Ce que fait le dashboard
 
 | Onglet | Contenu |

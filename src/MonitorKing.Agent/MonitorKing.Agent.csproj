@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>x64</PlatformTarget>
+    <!-- Agent installé (Release) : aucune fenêtre, il tourne en arrière-plan. En Debug, dotnet run garde la console et ses journaux. -->
+    <OutputType Condition="'$(Configuration)' == 'Release'">WinExe</OutputType>
     <!-- Les releases remplacent ce numéro par celui du tag (voir .github/workflows/release-agent.yml). -->
     <Version>0.3.1</Version>
     <SatelliteResourceLanguages>fr;en</SatelliteResourceLanguages>
