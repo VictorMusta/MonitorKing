@@ -19,11 +19,17 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Vérifier que le dashboard se charge (syntaxe, imports)
+        run: node src/MonitorKing.Dashboard/check.mjs
+
       - name: Compiler toute la solution (agent, serveur, moteur commun)
         run: dotnet build MonitorKing.sln -c Release
 
       - name: Publier l'agent autonome (Windows x64)
-        run: dotnet publish src/MonitorKing.Agent -c Release -r win-x64 --self-contained true -o out/MonitorKing-Agent
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          dotnet publish src/MonitorKing.Agent -c Release -r win-x64 --self-contained true -p:Version=$version -o out/MonitorKing-Agent
 
       - name: Ajouter le script d'inscription et zipper
         shell: pwsh

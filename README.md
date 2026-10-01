@@ -69,6 +69,8 @@ src/MonitorKing.Dashboard/   le dashboard (HTML/CSS/JS sans build ni CDN), servi
 deploy/                      docker-compose et bloc Caddy
 ```
 
+`node src/MonitorKing.Dashboard/check.mjs` vérifie que chaque module du dashboard se charge (syntaxe, imports et exports). La release de l'agent le lance avant de compiler.
+
 ## Limites connues
 
 - **Colonne « Disque / E/S »** : les compteurs par processus de Windows incluent le réseau ; une attribution disque exacte demanderait ETW.

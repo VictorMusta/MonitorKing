@@ -111,7 +111,8 @@ export function eventRow(e, { details = false } = {}) {
 }
 
 export function processCell(p) {
-  const exe = f.exeName(p); p.via ? `via ${p.via}` : null, p.count > 1 ? `${p.count} processus` : null].filter(Boolean).join(' · ');
+  const exe = f.exeName(p);
+  const sub = [exe !== f.appName(p) ? exe : null, p.via ? `via ${p.via}` : null, p.count > 1 ? `${p.count} processus` : null].filter(Boolean).join(' · ');
   return `<div class="app-name"><b title="${f.esc(exe)}">${f.esc(f.appName(p))}</b>${sub ? `<small>${f.esc(sub)}</small>` : ''}</div>`;
 }
 
