@@ -33,7 +33,8 @@ public sealed class CollectorHost : BackgroundService
         {
             new SystemCollector(),
             new GpuCollector(),
-            new ProcessCollector(database), // après le GPU : rattache l'usage GPU aux applications
+            new NetworkCollector(MachineInfo.IsAdministrator, loggers.CreateLogger<NetworkCollector>()),
+            new ProcessCollector(database), // après le GPU et le réseau : les rattache aux applications
             new SensorCollector(MachineInfo.IsAdministrator, TimeSpan.FromMilliseconds(options.SensorIntervalMs), machine.BoardLabel, loggers.CreateLogger<SensorCollector>()),
             new WifiCollector(),
             new HangCollector(database), // après les processus : nomme l'application gelée
@@ -217,6 +218,8 @@ internal sealed class WindowAccumulator
             row.IoWriteBps += group.IoWriteBps;
             row.HardFaultsPerSec += group.HardFaultsPerSec;
             row.Gpu += group.Gpu;
+            row.NetSendBps += group.NetSendBps;
+            row.NetRecvBps += group.NetRecvBps;
             row.RamMb = Math.Max(row.RamMb, group.RamMb);
             row.CommitMb = Math.Max(row.CommitMb, group.CommitMb);
             row.VramMb = Math.Max(row.VramMb, group.VramMb);
@@ -238,6 +241,8 @@ internal sealed class WindowAccumulator
             IoWriteBps = p.IoWriteBps / _ticks,
             HardFaultsPerSec = p.HardFaultsPerSec / _ticks,
             Gpu = p.Gpu / _ticks,
+            NetSendBps = p.NetSendBps / _ticks,
+            NetRecvBps = p.NetRecvBps / _ticks,
             RamMb = p.RamMb,
             CommitMb = p.CommitMb,
             VramMb = p.VramMb,
@@ -263,6 +268,7 @@ internal sealed class WindowAccumulator
         Top(p => p.HardFaultsPerSec, 5, 1);
         Top(p => p.Gpu, 5, 0.5);
         Top(p => p.VramMb, 5, 50);
+        Top(p => p.NetBps, 8, 1024);
 
         var result = (_lastTs, metrics, averages.Where(p => keep.Contains(p.Name)).ToList());
         _metrics.Clear();

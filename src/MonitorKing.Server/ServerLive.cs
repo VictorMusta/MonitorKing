@@ -23,7 +23,7 @@ public static class ServerLive
             .Select(r => new
             {
                 r.Name, r.Description, r.Via, r.Count, r.Cpu, r.RamMb, r.CommitMb, r.IoReadBps, r.IoWriteBps,
-                r.HardFaultsPerSec, r.Gpu, r.VramMb, Pids = Array.Empty<int>(),
+                r.HardFaultsPerSec, r.Gpu, r.VramMb, r.NetSendBps, r.NetRecvBps, Pids = Array.Empty<int>(),
             })
             .ToList();
 

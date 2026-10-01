@@ -275,19 +275,20 @@ public sealed class ReportBuilder
         Top(p => p.RamMb, 8);
         Top(p => p.IoBps, 8);
         Top(p => p.Gpu, 5);
+        Top(p => p.NetBps, 5);
         Top(p => p.HardFaultsPerSec, 3);
 
         md.AppendLine("## Applications sur la période");
         md.AppendLine();
         md.AppendLine("Moyennes sur la période (mémoire et VRAM : pic). Les svchost sont séparés par service ; les processus WebView2 sont rattachés à l'application qui les lance.");
         md.AppendLine();
-        md.AppendLine("| Application | Proc. | Processeur | Mémoire | Lecture | Écriture | Défauts durs | GPU | VRAM |");
-        md.AppendLine("|---|---|---|---|---|---|---|---|---|");
+        md.AppendLine("| Application | Proc. | Processeur | Mémoire | Lecture | Écriture | Réseau ↓ | Réseau ↑ | Défauts durs | GPU | VRAM |");
+        md.AppendLine("|---|---|---|---|---|---|---|---|---|---|---|");
         foreach (var p in processes.Where(p => keep.Contains(p.Name)).OrderByDescending(p => p.Cpu).ThenByDescending(p => p.RamMb))
         {
             var name = p.Description is { Length: > 0 } d && !d.Equals(p.Name, StringComparison.OrdinalIgnoreCase) ? $"{d} ({p.Name})" : p.Name;
             if (p.Via is not null) name += $" via {p.Via}";
-            md.AppendLine($"| {Fmt.Cell(name)} | {p.Count} | {Fmt.Pct(p.Cpu)} | {Fmt.Mb(p.RamMb)} | {Fmt.Rate(p.IoReadBps)} | {Fmt.Rate(p.IoWriteBps)} | {Fmt.Value(p.HardFaultsPerSec, "/s")} | {(p.Gpu > 0 ? Fmt.Pct(p.Gpu) : "–")} | {(p.VramMb > 0 ? Fmt.Mb(p.VramMb) : "–")} |");
+            md.AppendLine($"| {Fmt.Cell(name)} | {p.Count} | {Fmt.Pct(p.Cpu)} | {Fmt.Mb(p.RamMb)} | {Fmt.Rate(p.IoReadBps)} | {Fmt.Rate(p.IoWriteBps)} | {(p.NetRecvBps > 0 ? Fmt.Rate(p.NetRecvBps) : "–")} | {(p.NetSendBps > 0 ? Fmt.Rate(p.NetSendBps) : "–")} | {Fmt.Value(p.HardFaultsPerSec, "/s")} | {(p.Gpu > 0 ? Fmt.Pct(p.Gpu) : "–")} | {(p.VramMb > 0 ? Fmt.Mb(p.VramMb) : "–")} |");
         }
 
         md.AppendLine();
@@ -353,7 +354,7 @@ public sealed class ReportBuilder
     {
         md.AppendLine("## Pour interpréter");
         md.AppendLine();
-        md.AppendLine("- **Lecture/écriture par application** : compteurs d'E/S Windows par processus, réseau compris, et sans indication du disque visé : une application qui s'active pendant un pic du disque D: peut très bien écrire sur C:.");
+        md.AppendLine("- **Lecture/écriture par application** : compteurs d'E/S Windows par processus, réseau compris (le réseau seul est dans les colonnes Réseau, relevé par le traçage ETW quand l'agent est administrateur), et sans indication du disque visé : une application qui s'active pendant un pic du disque D: peut très bien écrire sur C:.");
         md.AppendLine("- **Activité d'un disque** : part du temps avec au moins une opération en cours. Sur un SSD, 100 % ne veut pas dire saturé : regarder le temps de réponse (SSD < 5 ms, disque dur < 20 ms).");
         md.AppendLine("- **Hausse** : moyenne de l'application pendant les pics divisée par sa moyenne au calme ; c'est elle qui désigne le coupable d'un pic, pas le volume total.");
         md.AppendLine("- **Défauts durs** : pages relues sur le disque ; beaucoup de défauts durs avec une RAM pleine = Windows pagine.");

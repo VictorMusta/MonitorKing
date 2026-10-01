@@ -359,9 +359,12 @@ export function sensors(root, ctx) {
 // ---------------------------------------------------------------- Réseau
 
 export function network(root, ctx) {
-  head(root, 'Réseau', 'Débit de la connexion et qualité du Wi-Fi.');
+  head(root, 'Réseau', 'Qui utilise la connexion, débit et qualité du Wi-Fi.');
+  banner(root, store.hint('network'));
   banner(root, store.hint('wifi'));
   return grid(root, [
+    { type: 'breakdown', size: 'l', params: { resource: 'net', percent: false } },
+    { type: 'top', size: 's', params: { by: 'net' } },
     { type: 'wifi', size: 's' },
     { type: 'stat', size: 's', params: { metric: 'wifi.signal' } },
     { type: 'chart', size: 'm', params: { metrics: ['net.down', 'net.up'], minutes: 30, title: 'Débit réseau' } },

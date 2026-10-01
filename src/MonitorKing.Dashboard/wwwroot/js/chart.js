@@ -474,13 +474,17 @@ export class StackedChart extends LineChart {
     ctx.font = `600 11px ${cssVar('--font') || 'system-ui'}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
+    // Écartement : de haut en bas, puis de bas en haut pour que la dernière étiquette ne sorte pas du graphique.
+    const gapPx = 12;
+    labels.forEach((l, n) => (l.y = n === 0 ? l.mid : Math.max(l.mid, labels[n - 1].y + gapPx)));
+    for (let n = labels.length - 1; n >= 0; n--) {
+      const l = labels[n];
+      l.y = Math.max(pad.t + 4, Math.min(l.y, n === labels.length - 1 ? pad.t + ph : labels[n + 1].y - gapPx));
+    }
     const muted = cssVar('--muted');
-    let previous = -Infinity;
     for (const l of labels) {
-      const ly = Math.min(pad.t + ph, Math.max(previous + 12, l.mid));
-      previous = ly;
       ctx.fillStyle = this.series[l.i].color ? muted : colors[l.i]; // couches grises (autres, reste) : texte lisible
-      ctx.fillText(percent ? fmtValue(l.share, '%') : fmtValue(l.value, unit), pad.l + pw + 6, ly);
+      ctx.fillText(percent ? fmtValue(l.share, '%') : fmtValue(l.value, unit), pad.l + pw + 6, l.y);
     }
 
     // Réticule + infobulle : de la couche du haut à celle du bas, avec la valeur et la part de chacune.

@@ -30,7 +30,8 @@ Copier `deploy/agent/demarrage-windows.cmd` et `demarrage-windows.ps1` dans `out
 | **Pourquoi ça rame ?** | Verdict : quelle ressource sature, quelle application en est responsable, ce que Windows a signalé à côté. Rapport Markdown à copier pour Claude. |
 | **Applications** | Répartition au fil du temps : part de chaque application dans le processeur, la RAM, le GPU, la VRAM ou les E/S (aires empilées, en % ou en valeurs, de 30 min à 7 jours). Puis la consommation en direct, triable. `svchost` séparés par service, processus WebView2 rattachés à leur application. |
 | **Processeur & mémoire** | Charge par cœur, pilotes (DPC), mémoire engagée, pagination, activité et temps de réponse de chaque disque. |
-| **Carte graphique**, **Capteurs**, **Réseau** | GPU par moteur, VRAM, températures, ventilateurs, Wi-Fi, débit. |
+| **Carte graphique**, **Capteurs** | GPU par moteur, VRAM, températures, ventilateurs. |
+| **Réseau** | Qui utilise la connexion (répartition par application au fil du temps, relevée par le traçage réseau ETW de Windows, agent en administrateur), débit, Wi-Fi. |
 | **Journal** | Plantages, gels, arrêts brutaux, écrans bleus, erreurs disque, WHEA, bridage CPU… importés dès le premier lancement (30 jours). |
 | **Historique** | Jusqu'à 7 jours. Un cliquer-glisser sur une période l'analyse ; la colonne « Hausse E/S » désigne l'application qui s'active pendant un pic. |
 
@@ -81,7 +82,7 @@ deploy/                      docker-compose et bloc Caddy
 
 ## Limites connues
 
-- **Colonne « Disque / E/S »** : les compteurs par processus de Windows incluent le réseau ; une attribution disque exacte demanderait ETW.
+- **Colonne « Disque / E/S »** : les compteurs par processus de Windows incluent le réseau ; une attribution disque exacte demanderait ETW. Le réseau seul a sa propre colonne (ETW, agent en administrateur ; sans ces droits, seul le débit total du PC est mesuré).
 - **Agent lancé à la main** : pas encore de service Windows. Un service tournerait dans la session 0 et ne verrait pas les fenêtres gelées : il faudra un petit assistant dans la session de l'utilisateur.
 - **Mises à jour de l'agent** : pas encore de distribution signée (prévu : clé qui reste sur le PC de Victor).
 

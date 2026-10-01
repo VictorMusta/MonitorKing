@@ -75,7 +75,9 @@ public sealed class Database
                 hard_faults REAL NOT NULL,
                 gpu REAL NOT NULL,
                 vram_mb REAL NOT NULL,
-                count INTEGER NOT NULL
+                count INTEGER NOT NULL,
+                net_send REAL NOT NULL DEFAULT 0,
+                net_recv REAL NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS ix_proc_sample_ts ON proc_sample(ts);
             CREATE TABLE IF NOT EXISTS event (
@@ -131,6 +133,24 @@ public sealed class Database
             DELETE FROM event WHERE level > 3 AND kind <> 'boot';
             """;
         command.ExecuteNonQuery();
+
+        // Bases créées avant le réseau par application (v0.3) : on ajoute les colonnes, à 0 pour l'historique.
+        AddColumnIfMissing(connection, "proc_sample", "net_send", "REAL NOT NULL DEFAULT 0");
+        AddColumnIfMissing(connection, "proc_sample", "net_recv", "REAL NOT NULL DEFAULT 0");
+    }
+
+    private static void AddColumnIfMissing(SqliteConnection connection, string table, string column, string definition)
+    {
+        using (var check = connection.CreateCommand())
+        {
+            check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $column";
+            check.Parameters.AddWithValue("$column", column);
+            if ((long)check.ExecuteScalar()! > 0) return;
+        }
+
+        using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+        alter.ExecuteNonQuery();
     }
 
     private long MetricId(SqliteConnection connection, SqliteTransaction? transaction, MetricDef def)
@@ -185,8 +205,8 @@ public sealed class Database
         {
             command.Transaction = transaction;
             command.CommandText = """
-                INSERT INTO proc_sample (ts, name, description, via, cpu, ram_mb, commit_mb, io_read, io_write, hard_faults, gpu, vram_mb, count)
-                VALUES ($ts, $name, $description, $via, $cpu, $ram, $commit, $read, $write, $hf, $gpu, $vram, $count)
+                INSERT INTO proc_sample (ts, name, description, via, cpu, ram_mb, commit_mb, io_read, io_write, hard_faults, gpu, vram_mb, count, net_send, net_recv)
+                VALUES ($ts, $name, $description, $via, $cpu, $ram, $commit, $read, $write, $hf, $gpu, $vram, $count, $netSend, $netRecv)
                 """;
             command.Parameters.AddWithValue("$ts", ts);
             var name = command.Parameters.Add("$name", SqliteType.Text);
@@ -201,8 +221,12 @@ public sealed class Database
             var gpu = command.Parameters.Add("$gpu", SqliteType.Real);
             var vram = command.Parameters.Add("$vram", SqliteType.Real);
             var count = command.Parameters.Add("$count", SqliteType.Integer);
+            var netSend = command.Parameters.Add("$netSend", SqliteType.Real);
+            var netRecv = command.Parameters.Add("$netRecv", SqliteType.Real);
             foreach (var p in processes)
             {
+                netSend.Value = p.NetSendBps;
+                netRecv.Value = p.NetRecvBps;
                 name.Value = p.Name;
                 description.Value = (object?)p.Description ?? DBNull.Value;
                 via.Value = (object?)p.Via ?? DBNull.Value;
@@ -286,6 +310,7 @@ public sealed class Database
             "gpu" => "gpu",
             "vram" => "vram_mb",
             "io" => "io_read + io_write",
+            "net" => "net_send + net_recv",
             _ => throw new ArgumentException($"Ressource inconnue : {resource}", nameof(resource)),
         };
 
@@ -407,7 +432,8 @@ public sealed class Database
                    SUM(cpu) / (SELECT n FROM windows), MAX(ram_mb), MAX(commit_mb),
                    SUM(io_read) / (SELECT n FROM windows), SUM(io_write) / (SELECT n FROM windows),
                    SUM(hard_faults) / (SELECT n FROM windows), SUM(gpu) / (SELECT n FROM windows),
-                   MAX(vram_mb), MAX(count)
+                   MAX(vram_mb), MAX(count),
+                   SUM(net_send) / (SELECT n FROM windows), SUM(net_recv) / (SELECT n FROM windows)
             FROM proc_sample WHERE ts >= $from AND ts <= $to
             GROUP BY name
             """;
@@ -431,6 +457,8 @@ public sealed class Database
                 Gpu = reader.GetDouble(9),
                 VramMb = reader.GetDouble(10),
                 Count = reader.GetInt32(11),
+                NetSendBps = reader.GetDouble(12),
+                NetRecvBps = reader.GetDouble(13),
             });
         }
 
@@ -732,7 +760,7 @@ public sealed class Database
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT ts, name, description, via, cpu, ram_mb, commit_mb, io_read, io_write, hard_faults, gpu, vram_mb, count
+            SELECT ts, name, description, via, cpu, ram_mb, commit_mb, io_read, io_write, hard_faults, gpu, vram_mb, count, net_send, net_recv
             FROM proc_sample WHERE ts > $from AND ts <= $to ORDER BY ts
             """;
         command.Parameters.AddWithValue("$from", fromExclusive);
@@ -755,6 +783,8 @@ public sealed class Database
                 Gpu = reader.GetDouble(10),
                 VramMb = reader.GetDouble(11),
                 Count = reader.GetInt32(12),
+                NetSendBps = reader.GetDouble(13),
+                NetRecvBps = reader.GetDouble(14),
             }));
         }
 

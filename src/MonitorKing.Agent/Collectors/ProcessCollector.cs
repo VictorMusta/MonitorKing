@@ -122,6 +122,12 @@ public sealed class ProcessCollector : ICollector
 
             if (context.VramBytesByPid.TryGetValue(p.Pid, out var vram))
                 group.VramMb += vram / Mb;
+
+            if (context.NetByPid.TryGetValue(p.Pid, out var net))
+            {
+                group.NetSendBps += net.Send;
+                group.NetRecvBps += net.Recv;
+            }
         }
 
         _previous = next;

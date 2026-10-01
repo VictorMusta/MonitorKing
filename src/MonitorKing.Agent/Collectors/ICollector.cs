@@ -29,6 +29,8 @@ public sealed class CollectContext
     public double ElapsedSeconds { get; }
     public Dictionary<int, GpuUsage> GpuByPid { get; } = new();
     public Dictionary<int, double> VramBytesByPid { get; } = new();
+    /// <summary>Débit réseau par processus pendant ce tick (o/s), quand l'agent peut écouter le réseau (administrateur).</summary>
+    public Dictionary<int, (double Send, double Recv)> NetByPid { get; } = new();
 }
 
 public readonly record struct GpuUsage(double Utilization, string Engine);

@@ -140,6 +140,8 @@ public sealed class Privacy
             HardFaultsPerSec = row.HardFaultsPerSec,
             Gpu = row.Gpu,
             VramMb = row.VramMb,
+            NetSendBps = row.NetSendBps,
+            NetRecvBps = row.NetRecvBps,
             Count = row.Count,
         };
     }

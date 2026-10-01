@@ -19,6 +19,9 @@ public sealed class ProcessGroup
     public double Gpu { get; set; }
     public string? GpuEngine { get; set; }
     public double VramMb { get; set; }
+    /// <summary>Débit réseau envoyé et reçu (o/s), hors trafic local ; 0 si l'agent n'est pas administrateur.</summary>
+    public double NetSendBps { get; set; }
+    public double NetRecvBps { get; set; }
     public List<int> Pids { get; } = new();
 }
 
@@ -65,8 +68,11 @@ public sealed class ProcRow
     public double HardFaultsPerSec { get; set; }
     public double Gpu { get; set; }
     public double VramMb { get; set; }
+    public double NetSendBps { get; set; }
+    public double NetRecvBps { get; set; }
     public int Count { get; set; }
     public double IoBps => IoReadBps + IoWriteBps;
+    public double NetBps => NetSendBps + NetRecvBps;
 }
 
 public sealed class EventItem

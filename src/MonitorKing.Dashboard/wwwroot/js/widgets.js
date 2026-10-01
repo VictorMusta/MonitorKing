@@ -28,6 +28,7 @@ export const RESOURCES = {
   cpu: { label: 'Processeur', value: (p) => p.cpu, format: (v) => f.pct(v), max: () => 100 },
   ram: { label: 'Mémoire vive', value: (p) => p.ramMb, format: (v) => f.mb(v), max: () => (store.info?.ramGb ?? 16) * 1024 },
   io: { label: 'Disque et E/S', value: (p) => p.ioReadBps + p.ioWriteBps, format: (v) => f.rate(v), max: (list) => Math.max(1, ...list.map((p) => p.ioReadBps + p.ioWriteBps)) },
+  net: { label: 'Réseau', value: (p) => (p.netSendBps ?? 0) + (p.netRecvBps ?? 0), format: (v) => f.rate(v), max: (list) => Math.max(1, ...list.map((p) => (p.netSendBps ?? 0) + (p.netRecvBps ?? 0))) },
   gpu: { label: 'Carte graphique', value: (p) => p.gpu, format: (v) => f.pct(v), max: () => 100 },
   vram: { label: 'Mémoire vidéo', value: (p) => p.vramMb, format: (v) => f.mb(v), max: (list) => vramTotalMb() ?? Math.max(1, ...list.map((p) => p.vramMb)) },
 };
@@ -38,7 +39,8 @@ const BREAKDOWN = {
   ram: { label: 'Mémoire vive', rest: 'Windows, cache et reste', note: '« Windows, cache et reste » : la mémoire utilisée au total moins celle des applications (noyau, pilotes, cache, petites applications).' },
   gpu: { label: 'Carte graphique', suffix: 'du GPU', note: 'Travail de la carte graphique demandé par chaque application, tous moteurs confondus (3D, vidéo, calcul).' },
   vram: { label: 'Mémoire vidéo', rest: 'Windows et reste', note: '« Windows et reste » : la mémoire vidéo utilisée au total moins celle des applications.' },
-  io: { label: 'Disque et réseau', note: 'Lectures et écritures de chaque application, disque et réseau confondus : Windows ne sépare pas le réseau application par application.' },
+  net: { label: 'Réseau', rest: 'Windows et reste', note: 'Données reçues et envoyées par chaque application, relevées par Windows (trafic local exclu). « Windows et reste » : le débit total des cartes réseau moins celui des applications. Il faut l’agent en administrateur.' },
+  io: { label: 'Disque et E/S', note: 'Lectures et écritures de chaque application : fichiers, mais aussi réseau et périphériques, que Windows compte ensemble.' },
 };
 const PERIODS = [[30, '30 min'], [60, '1 h'], [360, '6 h'], [1440, '24 h'], [10080, '7 j']];
 
@@ -482,6 +484,7 @@ export const catalog = {
         { id: 'cpu', label: 'Processeur', r: true },
         { id: 'ram', label: 'Mémoire', r: true },
         { id: 'io', label: 'Disque / E/S', r: true },
+        { id: 'net', label: 'Réseau', r: true },
         { id: 'gpu', label: 'GPU', r: true },
         { id: 'vram', label: 'VRAM', r: true },
       ];
@@ -531,7 +534,7 @@ export const catalog = {
           if (id !== sort) return `<td class="r">${text}</td>`;
           return `<td class="r"><span class="bar-cell"><span class="mini-bar"><div style="width:${(clamp01(v / max) * 100).toFixed(1)}%"></div></span>${text}</span></td>`;
         };
-        tbody.innerHTML = list.map((x) => `<tr><td>${processCell(x)}</td>${['cpu', 'ram', 'io', 'gpu', 'vram'].map((id) => cell(x, id)).join('')}</tr>`).join('');
+        tbody.innerHTML = list.map((x) => `<tr><td>${processCell(x)}</td>${['cpu', 'ram', 'io', 'net', 'gpu', 'vram'].map((id) => cell(x, id)).join('')}</tr>`).join('');
       };
       return { update: render };
     },

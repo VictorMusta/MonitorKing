@@ -15,22 +15,24 @@ public sealed record BreakdownResult(
 
 public static class Breakdown
 {
-    // Ressource → unité, et métrique totale du PC convertie dans la même unité (les totaux mémoire sont en Go).
-    // Pas de total pour le GPU (moteur le plus chargé, pas une somme) ni pour les E/S (réseau compris par application).
-    private static readonly Dictionary<string, (string Unit, string? TotalKey, double TotalFactor)> Resources = new()
+    // Ressource → unité, et métriques dont la somme donne le total du PC, converti dans la même unité
+    // (les totaux mémoire sont en Go). Pas de total pour le GPU (moteur le plus chargé, pas une somme)
+    // ni pour les E/S (qui mêlent disque, réseau et périphériques).
+    private static readonly Dictionary<string, (string Unit, string[] TotalKeys, double TotalFactor)> Resources = new()
     {
-        ["cpu"] = ("%", "cpu.total", 1),
-        ["ram"] = ("Mo", "mem.used", 1024),
-        ["gpu"] = ("%", null, 1),
-        ["vram"] = ("Mo", "gpu.vram", 1024),
-        ["io"] = ("o/s", null, 1),
+        ["cpu"] = ("%", new[] { "cpu.total" }, 1),
+        ["ram"] = ("Mo", new[] { "mem.used" }, 1024),
+        ["gpu"] = ("%", Array.Empty<string>(), 1),
+        ["vram"] = ("Mo", new[] { "gpu.vram" }, 1024),
+        ["io"] = ("o/s", Array.Empty<string>(), 1),
+        ["net"] = ("o/s", new[] { "net.down", "net.up" }, 1),
     };
 
     public static bool IsKnown(string resource) => Resources.ContainsKey(resource);
 
     public static BreakdownResult Build(Database db, string resource, long from, long to, int maxPoints, int top = 8)
     {
-        var (unit, totalKey, factor) = Resources[resource];
+        var (unit, totalKeys, factor) = Resources[resource];
         var step = Database.BucketStep(from, to, maxPoints);
         var (windows, rows) = db.ProcessBuckets(resource, from, to, step);
         var buckets = windows.Keys.Order().ToArray();
@@ -57,15 +59,17 @@ public static class Breakdown
             for (var i = 0; i < buckets.Length; i++) others[i] += app.Values[i];
 
         double[]? rest = null;
-        if (totalKey is not null)
+        if (totalKeys.Length > 0)
         {
-            var totals = db.BucketAverages(totalKey, from, to, step);
+            var totals = totalKeys.Select(key => db.BucketAverages(key, from, to, step)).ToList();
             rest = new double[buckets.Length];
             for (var i = 0; i < buckets.Length; i++)
             {
-                if (!totals.TryGetValue(buckets[i], out var total)) continue;
+                var known = totals.Where(t => t.ContainsKey(buckets[i])).ToList();
+                if (known.Count == 0) continue;
+                var total = known.Sum(t => t[buckets[i]]) * factor;
                 var recorded = ranked.Sum(a => a.Values[i]);
-                rest[i] = Math.Max(0, total * factor - recorded);
+                rest[i] = Math.Max(0, total - recorded);
             }
         }
 
