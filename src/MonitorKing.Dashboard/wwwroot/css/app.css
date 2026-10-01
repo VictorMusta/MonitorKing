@@ -360,4 +360,18 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .report-tools { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Serveur : sélecteur de PC, codes d'inscription */
+.machine-select {
+  font-weight: 600; font-size: 13px; padding: 3px 6px; border-radius: 6px; max-width: 260px;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+}
+code.code {
+  font: 600 13px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace; padding: 2px 6px; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+pre.snippet {
+  font: 12px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; word-break: break-all;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 6px 0 12px;
+}
 .report-tools select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); }

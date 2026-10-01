@@ -3,7 +3,7 @@ import { api } from './api.js';
 import { store } from './store.js';
 import { LineChart, cssVar } from './chart.js';
 import * as f from './format.js';
-import { icon } from './icons.js';
+import { icon, severityIcon } from './icons.js';
 import { catalog, mountWidget, renderDiagnosis, eventRow, processCell, RESOURCES, KIND_LABELS, SENSOR_TYPES } from './widgets.js';
 import { copyReport, downloadReport } from './report.js';
 
@@ -619,6 +619,158 @@ export function history(root, ctx) {
       tempChart?.destroy();
     },
   };
+}
+
+// ---------------------------------------------------------------- Mes PC (serveur)
+
+export function fleet(root, ctx) {
+  const header = head(root, 'Mes PC', 'Les PC inscrits sur ce serveur : s’ils répondent, et ce qui ne va pas.',
+    `<button class="btn primary" data-act="add">${icon('plus', 14)} Ajouter un PC</button>`);
+  const panel = document.createElement('div');
+  root.appendChild(panel);
+  const list = document.createElement('div');
+  list.className = 'grid';
+  root.appendChild(list);
+  let alive = true;
+
+  const render = (machines) => {
+    if (!alive) return;
+    if (machines.length === 0) {
+      list.innerHTML = '<section class="card span-l"><div class="empty">Aucun PC inscrit pour l’instant. Clique sur « Ajouter un PC » pour obtenir un code d’inscription.</div></section>';
+      return;
+    }
+    list.innerHTML = machines.map((m) => `
+      <section class="card span-m">
+        <div class="card-head">
+          <h2>${f.esc(m.label)}</h2>
+          <span class="meta"><span class="${m.online ? 'sev-ok' : 'muted'}">${m.online ? '● en ligne' : '○ hors ligne'}</span> · ${m.lastSeen ? f.esc(f.ago(m.lastSeen)) : 'jamais connecté'}</span>
+        </div>
+        <div class="verdict">
+          <span class="sev-icon">${severityIcon(m.severity ?? 'info', 20)}</span>
+          <div>
+            <h3 style="font-size:16px">${f.esc(m.verdict ?? 'En attente des premières données')}</h3>
+            <p>${f.esc([m.os, m.cpu, m.ramGb ? f.value(m.ramGb, 'Go') : null].filter(Boolean).join(' · ') || 'Fiche de la machine pas encore reçue')}</p>
+          </div>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+          <button class="btn" data-open="${f.esc(m.id)}">Ouvrir</button>
+          <span class="muted" style="font-size:12px">${m.mode === 'complet' ? 'Partage complet activé par l’utilisateur' : 'Mode discret : applications pseudonymisées'}</span>
+        </div>
+      </section>`).join('');
+  };
+
+  const load = () => ctx.refreshMachines().then(render).catch((e) => ctx.toast(e.message));
+
+  list.addEventListener('click', (e) => {
+    const id = e.target.closest('[data-open]')?.dataset.open;
+    if (id) ctx.selectMachine(id);
+  });
+
+  header.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-act="add"]')) return;
+    panel.innerHTML = `
+      <section class="card" style="margin-bottom:16px">
+        <div class="card-head"><h2>Ajouter un PC</h2></div>
+        <form class="toolbar" data-form="enroll">
+          <input class="search" name="label" maxlength="60" placeholder="Nom du PC, ex. « PC de Thomas »" required>
+          <button class="btn primary">Créer un code d’inscription</button>
+        </form>
+        <div data-result></div>
+      </section>`;
+    panel.querySelector('input').focus();
+  });
+
+  panel.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const label = e.target.label.value.trim();
+    if (!label) return;
+    try {
+      const { code, expires } = await api.createEnrollment(label);
+      const server = location.origin;
+      panel.querySelector('[data-result]').innerHTML = `
+        <p>Code pour <b>${f.esc(label)}</b> : <code class="code">${f.esc(code)}</code> <span class="muted">(usage unique, valable jusqu’à ${f.esc(f.dateTime(expires))})</span></p>
+        <p class="secondary">Sur le PC à surveiller, lance l’agent une première fois avec :</p>
+        <pre class="snippet">MonitorKing.Agent.exe --MonitorKing:Server:Url=${f.esc(server)} --MonitorKing:Server:EnrollmentCode=${f.esc(code)}</pre>
+        <p class="secondary">ou ajoute dans son <code>appsettings.json</code>, section <code>MonitorKing</code> :</p>
+        <pre class="snippet">"Server": { "Url": "${f.esc(server)}", "EnrollmentCode": "${f.esc(code)}" }</pre>
+        <p class="muted" style="font-size:12px">Une fois inscrit, le PC garde son propre jeton : le code ne sert plus. Par défaut, il envoie ses données en mode discret (applications pseudonymisées).</p>`;
+    } catch (err) {
+      ctx.toast(err.message);
+    }
+  });
+
+  load();
+  const timer = setInterval(load, 30_000);
+  return { destroy: () => { alive = false; clearInterval(timer); } };
+}
+
+// ---------------------------------------------------------------- Confidentialité (agent)
+
+export async function showPrivacy(dialog, ctx) {
+  let state;
+  let pseudonyms;
+  try {
+    [state, pseudonyms] = await Promise.all([api.privacy(), api.pseudonyms()]);
+  } catch (e) {
+    ctx.toast(e.message);
+    return;
+  }
+
+  const server = state.server;
+  const render = (filter = '') => {
+    const rows = pseudonyms
+      .filter((p) => !filter || `${p.name} ${p.description ?? ''} ${p.pseudonym}`.toLowerCase().includes(filter))
+      .slice(0, 200);
+    dialog.innerHTML = `
+      <form method="dialog">
+        <div class="dlg-head"><h2>Confidentialité et envoi</h2><button class="icon-btn" value="close" aria-label="Fermer">${icon('close', 16)}</button></div>
+        <div class="dlg-body">
+          <p><b>Mode actuel : ${state.mode === 'complet' ? `partage complet jusqu’à ${f.esc(f.time(state.fullUntil))}` : 'discret'}</b></p>
+          <ul class="secondary" style="margin:6px 0 14px;padding-left:18px">
+            <li>Tout le détail reste sur ce PC : tu vois tout ici.</li>
+            <li>En mode discret, ce qui part vers le serveur ne contient ni le nom de tes applications (remplacé par « Appli 7F3A9C »), ni les titres de fenêtres, ni le nom du Wi-Fi, ni les messages de Windows. Les composants de Windows restent lisibles.</li>
+            <li>Seul ce PC peut activer le partage complet, et il s’arrête tout seul.</li>
+          </ul>
+          <p class="secondary">${server
+            ? `Serveur : <b>${f.esc(server.url)}</b> · ${server.enrolled ? `inscrit sous le nom « ${f.esc(server.label ?? '?')} »` : 'pas encore inscrit'}${server.lastUpload ? ` · dernier envoi ${f.esc(f.ago(server.lastUpload))}` : ''}${server.lastError ? `<br><span class="sev-warning">${f.esc(server.lastError)}</span>` : ''}`
+            : 'Aucun serveur configuré : rien ne quitte ce PC.'}</p>
+          <div class="toolbar">
+            ${state.mode === 'complet'
+              ? '<button type="button" class="btn primary" data-privacy="discreet">Revenir au mode discret</button>'
+              : '<button type="button" class="btn" data-privacy="1">Tout partager pendant 1 h</button><button type="button" class="btn" data-privacy="24">pendant 24 h</button>'}
+          </div>
+          <h3 style="font-size:14px;margin:18px 0 8px">Retrouver une application à partir de son pseudonyme</h3>
+          <input class="search" data-filter type="search" placeholder="Pseudonyme ou nom (ex. 7F3A, steam)" value="${f.esc(filter)}" style="width:100%">
+          <div class="table-wrap" style="margin-top:8px"><table class="data"><thead><tr><th>Application</th><th>Côté serveur</th></tr></thead><tbody>
+            ${rows.map((p) => `<tr><td><b>${f.esc(p.description || p.name)}</b><div class="muted" style="font-size:12px">${f.esc(p.name)}</div></td>
+              <td>${p.system ? '<span class="muted">lisible (Windows)</span>' : `<code class="code">${f.esc(p.pseudonym)}</code>`}</td></tr>`).join('')}
+          </tbody></table></div>
+        </div>
+      </form>`;
+    const input = dialog.querySelector('[data-filter]');
+    input.addEventListener('input', () => {
+      const value = input.value.trim().toLowerCase();
+      render(value);
+      const again = dialog.querySelector('[data-filter]');
+      again.focus();
+      again.setSelectionRange(again.value.length, again.value.length);
+    });
+    dialog.querySelectorAll('[data-privacy]').forEach((button) => button.addEventListener('click', async () => {
+      try {
+        const choice = button.dataset.privacy;
+        if (choice === 'discreet') await api.backToDiscreet();
+        else await api.shareFull(Number(choice));
+        state = await api.privacy();
+        render(filter);
+        ctx.toast(state.mode === 'complet' ? 'Partage complet activé : il s’arrêtera tout seul.' : 'Retour au mode discret.');
+      } catch (e) {
+        ctx.toast(e.message);
+      }
+    }));
+  };
+
+  render();
+  if (!dialog.open) dialog.showModal();
 }
 
 // ---------------------------------------------------------------- Sélecteur de widget (accueil)

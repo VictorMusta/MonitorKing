@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using MonitorKing.Agent.Collectors;
-using MonitorKing.Agent.Storage;
 
 namespace MonitorKing.Agent;
 
@@ -34,7 +33,7 @@ public sealed class CollectorHost : BackgroundService
         {
             new SystemCollector(),
             new GpuCollector(),
-            new ProcessCollector(), // après le GPU : rattache l'usage GPU aux applications
+            new ProcessCollector(database), // après le GPU : rattache l'usage GPU aux applications
             new SensorCollector(MachineInfo.IsAdministrator, TimeSpan.FromMilliseconds(options.SensorIntervalMs), machine.BoardLabel, loggers.CreateLogger<SensorCollector>()),
             new WifiCollector(),
             new HangCollector(database), // après les processus : nomme l'application gelée

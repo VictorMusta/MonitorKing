@@ -1,7 +1,4 @@
 using System.Text.Json;
-using MonitorKing.Agent.Diagnosis;
-using MonitorKing.Agent.Reports;
-using MonitorKing.Agent.Storage;
 
 namespace MonitorKing.Agent;
 
@@ -73,22 +70,57 @@ public static class Api
             };
         });
 
-        api.MapGet("/diagnosis", (int? minutes, long? from, long? to, CollectorHost host, Database db, MachineInfo info, DiagnosisEngine engine) =>
+        api.MapGet("/diagnosis", (int? minutes, long? from, long? to, AgentMachine machine, DiagnosisEngine engine) =>
         {
             var window = from is { } begin && to is { } end && end > begin
-                ? WindowFactory.History(begin, end, db, host, info)
-                : WindowFactory.Live(minutes ?? 2, db, host, info);
+                ? WindowFactory.History(machine, begin, end)
+                : machine.Live(minutes ?? 2);
             return engine.Analyze(window);
         });
 
         // Rapport complet d'une période, en Markdown, pensé pour être lu par Claude (ou un humain).
-        api.MapGet("/report", (int? minutes, long? from, long? to, ReportBuilder reports) =>
+        api.MapGet("/report", (int? minutes, long? from, long? to, AgentMachine machine, ReportBuilder reports) =>
         {
             var end = to ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var begin = from ?? end - Math.Clamp(minutes ?? 60, 1, 7 * 24 * 60) * 60_000L;
             if (end <= begin) return Results.BadRequest("Période vide");
-            return Results.Text(reports.Build(begin, end), "text/markdown; charset=utf-8");
+            return Results.Text(reports.Build(machine, begin, end), "text/markdown; charset=utf-8");
         });
+
+        // Mode de l'interface : l'agent sert une seule machine, la sienne.
+        api.MapGet("/mode", () => new { Mode = "agent" });
+
+        // Confidentialité : ce que l'agent envoie au serveur. Ces routes ne sont accessibles que depuis ce PC
+        // (écoute sur localhost uniquement) : c'est l'utilisateur du PC qui décide, jamais le serveur.
+        api.MapGet("/privacy", (Privacy privacy, AgentOptions options, Database db) => new
+        {
+            privacy.Mode,
+            privacy.FullUntil,
+            Server = string.IsNullOrWhiteSpace(options.Server.Url) ? null : new
+            {
+                options.Server.Url,
+                Enrolled = db.Get(UploadService.TokenKey) is not null,
+                Label = db.Get(UploadService.LabelKey),
+                LastUpload = long.TryParse(db.Get(UploadService.LastUploadKey), out var last) ? last : (long?)null,
+                LastError = db.Get(UploadService.LastErrorKey),
+            },
+        });
+
+        api.MapPost("/privacy/full", (int? hours, Privacy privacy) =>
+        {
+            privacy.ShareFullFor(TimeSpan.FromHours(Math.Clamp(hours ?? 1, 1, 72)));
+            return Results.Ok(new { privacy.Mode, privacy.FullUntil });
+        });
+
+        api.MapPost("/privacy/discreet", (Privacy privacy) =>
+        {
+            privacy.BackToDiscreet();
+            return Results.Ok(new { privacy.Mode });
+        });
+
+        // Correspondance pseudonyme → application, pour que l'utilisateur retrouve ce dont Victor lui parle.
+        api.MapGet("/pseudonyms", (Privacy privacy, Database db) =>
+            db.Apps().Select(a => new { a.Name, a.Description, a.System, Pseudonym = privacy.PseudonymOf(a.Name) }).ToList());
 
         api.MapGet("/layouts/{id}", (string id, Database db) =>
             db.GetLayout(id) is { } json ? Results.Content(json, "application/json") : Results.NotFound());

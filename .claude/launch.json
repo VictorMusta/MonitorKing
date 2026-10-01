@@ -6,6 +6,12 @@
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "src/MonitorKing.Agent/MonitorKing.Agent.csproj"],
       "port": 5757
+    },
+    {
+      "name": "monitorking-server",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "src/MonitorKing.Server/MonitorKing.Server.csproj", "--", "--MonitorKing:Port=8099", "--MonitorKing:DataDirectory=server-data"],
+      "port": 8099
     }
   ]
 }

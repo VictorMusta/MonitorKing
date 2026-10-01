@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Serveur central : reçoit les lots des agents (déjà pseudonymisés en mode discret), les range par machine
+       et sert le même dashboard avec un sélecteur de PC. Tourne sous Linux, dans Docker. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>0.2.0</Version>
+    <RootNamespace>MonitorKing.Server</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="..\MonitorKing.Dashboard\wwwroot\**\*" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MonitorKing.Core\MonitorKing.Core.csproj" />
+  </ItemGroup>
+
+</Project>

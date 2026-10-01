@@ -1,6 +1,5 @@
 using System.Text;
 using MonitorKing.Agent.Native;
-using MonitorKing.Agent.Storage;
 
 namespace MonitorKing.Agent.Collectors;
 

@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace MonitorKing.Agent.Diagnosis;
+namespace MonitorKing.Core.Diagnosis;
 
 public sealed record Finding(string Severity, string Resource, string Title, string Detail, string? Culprit = null);
 

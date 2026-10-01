@@ -1,0 +1,19 @@
+# Bloc à ajouter au Caddyfile du VPS (/etc/caddy/Caddyfile).
+# Remplacer SOUS-DOMAINE par le nom DuckDNS choisi et HASH par la sortie de « caddy hash-password ».
+SOUS-DOMAINE.duckdns.org {
+	encode gzip
+
+	# Agents : inscription et envoi des mesures, protégés par code d'inscription puis jeton par machine.
+	@agents path /enroll /ingest/*
+	handle @agents {
+		reverse_proxy 127.0.0.1:8095
+	}
+
+	# Dashboard et API : réservés à Victor.
+	handle {
+		basic_auth {
+			victor HASH
+		}
+		reverse_proxy 127.0.0.1:8095
+	}
+}

@@ -1,33 +1,11 @@
-using MonitorKing.Agent.Storage;
+namespace MonitorKing.Core.Diagnosis;
 
-namespace MonitorKing.Agent.Diagnosis;
-
-/// <summary>Construit les données d'une fenêtre de temps : en direct (mémoire) ou passée (SQLite).</summary>
+/// <summary>Construit les données d'une période passée, lues dans la base d'une machine.</summary>
 public static class WindowFactory
 {
-    public static WindowData Live(int minutes, Database db, CollectorHost host, MachineInfo info)
+    public static WindowData History(IMachineContext machine, long from, long to)
     {
-        var span = Math.Clamp(minutes, 1, 5);
-        var (metrics, processes) = host.RecentWindow(span);
-        var now = host.Latest?.Ts ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        return new WindowData
-        {
-            From = now - span * 60_000L,
-            To = now,
-            Live = true,
-            Metrics = metrics,
-            Processes = processes,
-            Events = db.Events(now - 7L * 24 * 3600_000, now, 1000),
-            Hangs = db.Hangs(now - 24L * 3600_000, now),
-            ActiveHangs = host.Latest?.Hung.ToList() ?? new List<HungWindow>(),
-            Sensors = host.Latest?.Sensors.ToList() ?? new List<SensorReading>(),
-            RamTotalGb = info.RamGb,
-            Labels = host.Definitions.ToDictionary(d => d.Key, d => d.Label),
-        };
-    }
-
-    public static WindowData History(long from, long to, Database db, CollectorHost host, MachineInfo info)
-    {
+        var db = machine.Database;
         var stats = db.MetricStats(from, to);
         return new WindowData
         {
@@ -38,9 +16,9 @@ public static class WindowFactory
             Processes = db.TopProcesses(from, to),
             Events = db.Events(from, to, 1000),
             Hangs = db.Hangs(from, to),
-            Sensors = PeakTemperatures(stats, host.Definitions),
-            RamTotalGb = info.RamGb,
-            Labels = host.Definitions.ToDictionary(d => d.Key, d => d.Label),
+            Sensors = PeakTemperatures(stats, machine.Definitions),
+            RamTotalGb = machine.Summary.RamGb,
+            Labels = machine.Definitions.ToDictionary(d => d.Key, d => d.Label),
         };
     }
 

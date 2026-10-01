@@ -1,68 +1,77 @@
 # MonitorKing
 
-Comprendre en temps réel **pourquoi un PC Windows rame** (application gelée, disque saturé, RAM pleine, surchauffe, erreurs), et le retrouver après coup.
+Comprendre **pourquoi un PC Windows rame** (application gelée, disque saturé, RAM pleine, surchauffe, erreurs), en direct et après coup, sur son PC comme sur ceux de ses proches.
 
-> Prototype V0 : agent local + dashboard sur `http://localhost:5757`. La synchronisation vers le serveur n'est pas encore faite.
+- **Agent** (Windows) : observe le PC, garde tout en local, sert un dashboard sur `http://localhost:5757`.
+- **Serveur** (Linux, Docker) : reçoit les données des agents inscrits, en **mode discret** par défaut, et sert le même dashboard avec un sélecteur de PC.
 
-## Lancer
+## Lancer l'agent
 
 ```bash
 dotnet run --project src/MonitorKing.Agent
 ```
 
-Puis ouvrir <http://localhost:5757>. Prérequis : SDK .NET 8, Windows 10/11. Les droits administrateur ne sont pas nécessaires.
+Puis ouvrir <http://localhost:5757>. Prérequis : SDK .NET 8, Windows 10/11. Les droits administrateur ne sont pas nécessaires. En administrateur, avec le pilote [PawnIO](https://pawnio.eu) installé, l'agent lit aussi les températures du processeur et de la carte mère.
 
-## Ce que fait le prototype
+## Ce que fait le dashboard
 
 | Onglet | Contenu |
 |---|---|
-| **Accueil** | Écran personnalisable : *Personnaliser* → ajouter, déplacer, redimensionner ou retirer des widgets. La disposition est enregistrée dans la base locale. |
-| **Pourquoi ça rame ?** | Verdict en direct : quelle ressource sature, quelle application en est responsable, et ce que Windows a signalé à côté. |
-| **Applications** | Consommation par application (processeur, RAM, E/S, GPU, VRAM), triable. Les `svchost` sont séparés par service, et les processus WebView2 sont rattachés à l'application qui les lance (ex. Clipchamp). |
-| **Processeur & mémoire** | Charge par cœur, temps passé dans les pilotes (DPC), mémoire engagée, pagination (défauts durs), activité et temps de réponse de chaque disque. |
-| **Carte graphique** | Charge par moteur (3D, vidéo, calcul), VRAM, températures, puissance, ventilateurs. |
-| **Capteurs** | Tout ce que LibreHardwareMonitor lit sur la machine. |
-| **Réseau** | Débit, qualité et puissance du signal Wi-Fi, canal, débit de liaison. |
-| **Journal** | Événements Windows utiles : plantages (1000), gels (1002), arrêts brutaux (41, 6008), écrans bleus, mémoire virtuelle épuisée (2004), erreurs disque, WHEA, bridage CPU (37), plantage du pilote graphique (4101), plus les gels détectés par l'agent. Les 30 derniers jours sont importés dès le premier lancement. |
-| **Historique** | Courbes jusqu'à 7 jours. Un cliquer-glisser sur une période l'analyse : verdict et applications responsables à ce moment-là. |
+| **Mes PC** (serveur) | Les PC inscrits : en ligne ou non, verdict du moment, bouton « Ajouter un PC » qui génère un code d'inscription. |
+| **Accueil** | Écran personnalisable : *Personnaliser* → ajouter, déplacer, redimensionner ou retirer des widgets. |
+| **Pourquoi ça rame ?** | Verdict : quelle ressource sature, quelle application en est responsable, ce que Windows a signalé à côté. Rapport Markdown à copier pour Claude. |
+| **Applications** | Consommation par application (processeur, RAM, E/S, GPU, VRAM), triable. `svchost` séparés par service, processus WebView2 rattachés à leur application. |
+| **Processeur & mémoire** | Charge par cœur, pilotes (DPC), mémoire engagée, pagination, activité et temps de réponse de chaque disque. |
+| **Carte graphique**, **Capteurs**, **Réseau** | GPU par moteur, VRAM, températures, ventilateurs, Wi-Fi, débit. |
+| **Journal** | Plantages, gels, arrêts brutaux, écrans bleus, erreurs disque, WHEA, bridage CPU… importés dès le premier lancement (30 jours). |
+| **Historique** | Jusqu'à 7 jours. Un cliquer-glisser sur une période l'analyse ; la colonne « Hausse E/S » désigne l'application qui s'active pendant un pic. |
 
-## Principes (issus de la session BMAD *forge-idea*)
+## Confidentialité
 
-- **L'agent ne fait qu'observer.** Aucune route de l'API n'agit sur le PC, et l'agent n'exécute aucune commande reçue. Il écoute uniquement sur `localhost`, avec filtrage de l'en-tête `Host`.
-- **Les métriques sont modulaires.** Un collecteur (`ICollector`) déclare ses `MetricDef`, et le dashboard les découvre via `/api/metrics`. Ajouter une métrique revient à écrire un collecteur.
-- **L'affichage est modulaire.** Les onglets et l'accueil utilisent le même catalogue de widgets (`wwwroot/js/widgets.js`).
-- **Prévu, mais pas encore fait :** le code de l'agent sera signé avec une clé qui reste sur le PC de Victor. Le serveur pourra distribuer les mises à jour, mais pas en fabriquer une valide.
+- **Mode discret (par défaut)** : tout le détail reste sur le PC. Vers le serveur partent les mesures, les composants de Windows en clair (ce qui est installé sous `C:\Windows`, Defender…) et les autres applications **sous pseudonyme** (« Appli 7F3A9C », calculé avec une clé qui ne quitte jamais le PC). Ni titres de fenêtres, ni nom du Wi-Fi, ni messages Windows (chemins, noms d'utilisateur).
+- **Retrouver une application** : sur le PC, *Confidentialité et envoi* (pied de page) donne la correspondance pseudonyme → application.
+- **Partage complet** : activable seulement depuis le PC, pour 1 h ou 24 h, puis retour automatique au mode discret.
+- **Lecture seule** : l'agent n'exécute jamais de commande reçue ; le serveur ne peut rien lui demander. La connexion part toujours du PC.
 
-Décisions et pistes : `_bmad-output/forge/monitorking/.memlog.md` (session forge en pause, reprenable avec `/bmad-forge-idea`).
+## Inscrire un PC sur le serveur
+
+1. Dans le dashboard du serveur, *Mes PC* → *Ajouter un PC* → nom du PC → un code à usage unique (24 h).
+2. Sur le PC, lancer l'agent une première fois avec l'adresse du serveur et le code :
+
+```bash
+dotnet run --project src/MonitorKing.Agent -- --MonitorKing:Server:Url=https://monitorking.example.duckdns.org --MonitorKing:Server:EnrollmentCode=ABCD-EFGH
+```
+
+Le PC garde ensuite son propre jeton (le code ne sert plus) et envoie ses données par lots compressés toutes les 15 s, avec rattrapage s'il a été hors ligne.
+
+## Déployer le serveur (Docker + Caddy)
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+Le conteneur écoute sur `127.0.0.1:8095`. Le bloc [deploy/Caddyfile.monitorking](deploy/Caddyfile.monitorking) protège le dashboard par mot de passe (`caddy hash-password`) et laisse passer uniquement `/enroll` et `/ingest/*` vers les agents. Données dans le volume `monitorking_data` (30 jours de mesures).
 
 ## Architecture
 
 ```
-src/MonitorKing.Agent/            ASP.NET Core 8 (Kestrel sur localhost)
-  Collectors/                     un fichier par famille de données
-    SystemCollector               CPU par cœur, DPC, mémoire, disques physiques, réseau
-    ProcessCollector              NtQuerySystemInformation : tous les processus en un appel, sans handle
-    GpuCollector                  compteurs « GPU Engine » (comme le Gestionnaire des tâches)
-    SensorCollector               LibreHardwareMonitorLib 0.9.6
-    WifiCollector                 API Native Wifi
-    HangCollector                 fenêtres « Ne répond pas » (IsHungAppWindow) et durée des gels
-  EventLogService                 import des 30 derniers jours, puis abonnement (pas de relecture périodique)
-  CollectorHost                   tick de 2 s, 30 min en mémoire, agrégats de 10 s (moyenne + pic) dans SQLite
-  Diagnosis/DiagnosisEngine       règles explicables (« pourquoi ça rame ? »), en direct ou sur une période
-  Storage/Database                SQLite : %LOCALAPPDATA%\MonitorKing\monitorking.db
-  wwwroot/                        dashboard en HTML/CSS/JS (modules ES), sans build ni CDN : fonctionne hors ligne
+src/MonitorKing.Core/        moteur commun (sans Windows) : modèles, SQLite, diagnostic, rapports, contrat d'envoi
+src/MonitorKing.Agent/       Windows : collecteurs, journaux d'événements, mode discret, envoi vers le serveur
+  Collectors/                CPU par cœur, processus (NtQuerySystemInformation), GPU, capteurs (LibreHardwareMonitor),
+                             Wi-Fi, fenêtres « Ne répond pas »
+  Privacy, UploadService     pseudonymisation, lots compressés avec curseur
+src/MonitorKing.Server/      Linux : inscription, réception des lots, une base par PC, API /api/m/{id}/…
+src/MonitorKing.Dashboard/   le dashboard (HTML/CSS/JS sans build ni CDN), servi par l'agent et par le serveur
+deploy/                      docker-compose et bloc Caddy
 ```
-
-API : `GET /api/info | status | metrics | live | series | processes | events | diagnosis`, `GET/PUT /api/layouts/{id}`.
-
-Rétention : 14 jours pour les mesures, 90 jours pour les événements (`appsettings.json`).
 
 ## Limites connues
 
-- **Températures CPU et carte mère :** il faut lancer l'agent en administrateur, avec le pilote signé [PawnIO](https://pawnio.eu) installé. L'agent n'installe jamais de pilote lui-même. Le GPU fonctionne sans droits admin.
-- **Colonne « Disque / E/S » :** les compteurs par processus de Windows incluent aussi le réseau. Une attribution disque exacte demanderait ETW, donc les droits admin.
-- **Journal de démarrage** (Diagnostics-Performance) : réservé aux administrateurs.
-- **Lancement :** l'agent tourne comme une application dans la session de l'utilisateur, pas encore comme un service Windows. Un service tournerait dans la session 0 et ne verrait pas les fenêtres gelées : il faudra lui adjoindre un petit assistant dans la session de l'utilisateur.
+- **Colonne « Disque / E/S »** : les compteurs par processus de Windows incluent le réseau ; une attribution disque exacte demanderait ETW.
+- **Agent lancé à la main** : pas encore de service Windows. Un service tournerait dans la session 0 et ne verrait pas les fenêtres gelées : il faudra un petit assistant dans la session de l'utilisateur.
+- **Mises à jour de l'agent** : pas encore de distribution signée (prévu : clé qui reste sur le PC de Victor).
+
+Décisions et pistes : `_bmad-output/forge/monitorking/.memlog.md` (session BMAD *forge-idea*, reprenable avec `/bmad-forge-idea`).
 
 ## Licence
 
@@ -70,9 +79,8 @@ MIT, voir [LICENSE](LICENSE). Composants tiers :
 - [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) (MPL 2.0), via NuGet ;
 - l'outillage [BMAD Method](https://github.com/bmad-code-org/BMAD-METHOD) (MIT, © BMad Code, LLC) dans `_bmad/` et `.claude/skills/`.
 
-## Prochaines étapes envisagées
+## Prochaines étapes
 
-1. Synchronisation vers le serveur auto-hébergé : rattrapage par paquets compressés avec curseur, et temps réel par WebSocket. La connexion part toujours de l'agent vers le serveur, avec un jeton par machine.
-2. Signature des versions de l'agent et vérification à l'installation.
-3. Service Windows avec assistant dans la session utilisateur, et ETW pour attribuer les accès disque par processus.
-4. Serveur MCP pour interroger l'historique des machines depuis Claude.
+1. Déploiement sur le VPS et inscription du premier PC.
+2. Serveur MCP : interroger les machines depuis Claude et être prévenu quand un PC a un problème.
+3. Agent en service Windows, mises à jour signées, ETW pour l'attribution disque.

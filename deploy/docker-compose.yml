@@ -1,0 +1,18 @@
+# Déploiement du serveur central sur le VPS.
+# Le conteneur n'écoute que sur 127.0.0.1 : seul Caddy (sur l'hôte) y accède, en HTTPS depuis l'extérieur.
+services:
+  monitorking:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: monitorking
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8095:8080"
+    volumes:
+      - monitorking_data:/data
+    environment:
+      - TZ=Europe/Paris
+
+volumes:
+  monitorking_data:

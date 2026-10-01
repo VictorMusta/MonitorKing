@@ -1,20 +1,4 @@
-namespace MonitorKing.Agent;
-
-public sealed class AgentOptions
-{
-    public int Port { get; set; } = 5757;
-    public int SampleIntervalMs { get; set; } = 2000;
-    /// <summary>Rythme de lecture des capteurs matériels (lecture lente, sur son propre fil).</summary>
-    public int SensorIntervalMs { get; set; } = 5000;
-    /// <summary>Nombre de ticks agrégés dans une ligne SQLite (5 × 2 s = 10 s).</summary>
-    public int PersistEveryTicks { get; set; } = 5;
-    public int RetentionDays { get; set; } = 14;
-    public int EventRetentionDays { get; set; } = 90;
-    public int EventBackfillDays { get; set; } = 30;
-    public string? DataDirectory { get; set; }
-    /// <summary>Nom affiché pour les sondes de la carte mère. Vide = déduit (fabricant + chipset, ex. « MSI B550 »).</summary>
-    public string? MotherboardLabel { get; set; }
-}
+namespace MonitorKing.Core;
 
 /// <summary>Définition d'une métrique. Tout collecteur peut en déclarer, y compris à l'exécution.</summary>
 public sealed record MetricDef(string Key, string Label, string Unit, string Group, double? Max = null);

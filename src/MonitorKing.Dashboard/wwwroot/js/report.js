@@ -1,14 +1,9 @@
 // Rapports Markdown : à copier dans une conversation avec Claude, ou à télécharger.
 import { store } from './store.js';
-
-function query(params) {
-  const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v != null) q.set(k, v);
-  return q.toString();
-}
+import { api } from './api.js';
 
 async function fetchReport(params) {
-  const response = await fetch(`/api/report?${query(params)}`);
+  const response = await fetch(api.reportUrl(params));
   if (!response.ok) throw new Error(`Rapport indisponible (${response.status})`);
   return response.text();
 }

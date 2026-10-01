@@ -39,7 +39,10 @@ public sealed class ProcessCollector : ICollector
     };
 
     private readonly int _logicalCores = Environment.ProcessorCount;
+    private readonly Database _database;
     private readonly Dictionary<string, string?> _descriptions = new(StringComparer.OrdinalIgnoreCase);
+
+    public ProcessCollector(Database database) => _database = database;
     private Dictionary<int, Previous> _previous = new();
     private Dictionary<int, (string Names, string Display)> _services = new();
     private HashSet<int> _serviceless = new();
@@ -246,22 +249,28 @@ public sealed class ProcessCollector : ICollector
         return list;
     }
 
-    /// <summary>Nom lisible de l'application (« Description » de l'exécutable), mis en cache par nom.</summary>
+    /// <summary>
+    /// Nom lisible de l'application (« Description » de l'exécutable), mis en cache par nom.
+    /// Note aussi son emplacement dans le catalogue : installée sous C:\Windows = composant de Windows,
+    /// qui reste lisible côté serveur en mode discret.
+    /// </summary>
     private string? Describe(string name, List<int> pids)
     {
         if (_descriptions.TryGetValue(name, out var cached)) return cached;
 
         string? description = null;
+        string? path = null;
         foreach (var pid in pids.Take(3))
         {
             var handle = NativeMethods.OpenProcess(NativeMethods.ProcessQueryLimitedInformation, false, pid);
             if (handle == IntPtr.Zero) continue;
             try
             {
-                var path = new StringBuilder(1024);
-                var size = path.Capacity;
-                if (!NativeMethods.QueryFullProcessImageName(handle, 0, path, ref size)) continue;
-                var info = FileVersionInfo.GetVersionInfo(path.ToString());
+                var buffer = new StringBuilder(1024);
+                var size = buffer.Capacity;
+                if (!NativeMethods.QueryFullProcessImageName(handle, 0, buffer, ref size)) continue;
+                path = buffer.ToString();
+                var info = FileVersionInfo.GetVersionInfo(path);
                 description = string.IsNullOrWhiteSpace(info.FileDescription) ? null : info.FileDescription.Trim();
                 break;
             }
@@ -276,8 +285,20 @@ public sealed class ProcessCollector : ICollector
         }
 
         _descriptions[name] = description;
+        var system = path is not null && path.StartsWith(WindowsDirectory, StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            _database.UpsertApp(name, path, description, system);
+        }
+        catch (Exception)
+        {
+            // Le catalogue est un confort : son absence ne doit pas bloquer la collecte.
+        }
+
         return description;
     }
+
+    private static readonly string WindowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd('\\') + "\\";
 
     public void Dispose()
     {

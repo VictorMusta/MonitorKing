@@ -7,6 +7,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{234A3635-340
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonitorKing.Agent", "src\MonitorKing.Agent\MonitorKing.Agent.csproj", "{F77BEAB3-D121-41D1-BD55-49228FEC4F8C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonitorKing.Core", "src\MonitorKing.Core\MonitorKing.Core.csproj", "{70FA0A38-377E-4DCF-875F-4AAB6C5F545A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MonitorKing.Server", "src\MonitorKing.Server\MonitorKing.Server.csproj", "{215011C4-3399-45B7-B714-052F7ACA7E04}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,8 +24,18 @@ Global
 		{F77BEAB3-D121-41D1-BD55-49228FEC4F8C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F77BEAB3-D121-41D1-BD55-49228FEC4F8C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F77BEAB3-D121-41D1-BD55-49228FEC4F8C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{70FA0A38-377E-4DCF-875F-4AAB6C5F545A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{70FA0A38-377E-4DCF-875F-4AAB6C5F545A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{70FA0A38-377E-4DCF-875F-4AAB6C5F545A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{70FA0A38-377E-4DCF-875F-4AAB6C5F545A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{215011C4-3399-45B7-B714-052F7ACA7E04}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{215011C4-3399-45B7-B714-052F7ACA7E04}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{215011C4-3399-45B7-B714-052F7ACA7E04}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{215011C4-3399-45B7-B714-052F7ACA7E04}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{F77BEAB3-D121-41D1-BD55-49228FEC4F8C} = {234A3635-340F-4678-802F-5D419C3C12B1}
+		{70FA0A38-377E-4DCF-875F-4AAB6C5F545A} = {234A3635-340F-4678-802F-5D419C3C12B1}
+		{215011C4-3399-45B7-B714-052F7ACA7E04} = {234A3635-340F-4678-802F-5D419C3C12B1}
 	EndGlobalSection
 EndGlobal

@@ -19,6 +19,17 @@ export const store = {
     this.setDefs(defs);
   },
 
+  /** Oublie tout ce qui concerne la machine affichée (changement de PC côté serveur). */
+  reset() {
+    this.info = null;
+    this.status = [];
+    this.defs = new Map();
+    this.latest = null;
+    this.lastOk = 0;
+    this.history = new Map();
+    this.seeded = new Set();
+  },
+
   setDefs(defs) {
     for (const d of defs) this.defs.set(d.key, d);
   },

@@ -1,6 +1,5 @@
 using System.Diagnostics.Eventing.Reader;
 using System.Text.RegularExpressions;
-using MonitorKing.Agent.Storage;
 
 namespace MonitorKing.Agent;
 

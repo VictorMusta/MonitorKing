@@ -1,8 +1,8 @@
 using System.Text;
-using MonitorKing.Agent.Diagnosis;
-using MonitorKing.Agent.Storage;
+using MonitorKing.Core.Diagnosis;
+using MonitorKing.Core.Storage;
 
-namespace MonitorKing.Agent.Reports;
+namespace MonitorKing.Core.Reports;
 
 /// <summary>
 /// Rapport Markdown d'une période : de quoi comprendre ce qui s'est passé et conseiller,
@@ -31,58 +31,48 @@ public sealed class ReportBuilder
         ["ok"] = "OK",
     };
 
-    private readonly Database _db;
-    private readonly CollectorHost _host;
-    private readonly MachineInfo _machine;
     private readonly DiagnosisEngine _engine;
-    private readonly AgentOptions _options;
 
-    public ReportBuilder(Database db, CollectorHost host, MachineInfo machine, DiagnosisEngine engine, AgentOptions options)
-    {
-        _db = db;
-        _host = host;
-        _machine = machine;
-        _engine = engine;
-        _options = options;
-    }
+    public ReportBuilder(DiagnosisEngine engine) => _engine = engine;
 
-    public string Build(long from, long to)
+    public string Build(IMachineContext machine, long from, long to)
     {
-        var defs = _host.Definitions.ToDictionary(d => d.Key);
-        var window = WindowFactory.History(from, to, _db, _host, _machine);
+        var db = machine.Database;
+        var defs = machine.Definitions.ToDictionary(d => d.Key);
+        var window = WindowFactory.History(machine, from, to);
         var diagnosis = _engine.Analyze(window);
         var descriptions = window.Processes
             .Where(p => p.Description is not null)
             .ToDictionary(p => p.Name, p => p.Description!, StringComparer.OrdinalIgnoreCase);
 
         var md = new StringBuilder();
-        Header(md, from, to);
-        Machine(md, defs);
+        Header(md, machine.Summary, db, from, to);
+        Machine(md, machine.Summary, defs);
         Verdict(md, diagnosis);
-        Spikes(md, from, to, defs, descriptions);
+        Spikes(md, db, from, to, defs, descriptions);
         Measures(md, window.Metrics, defs);
         Applications(md, window.Processes);
-        Events(md, window, from, to);
+        Events(md, db, window, to);
         Hangs(md, window.Hangs);
-        Interpretation(md);
+        Interpretation(md, machine.Summary);
         return md.ToString();
     }
 
-    private void Header(StringBuilder md, long from, long to)
+    private static void Header(StringBuilder md, MachineSummary machine, Database db, long from, long to)
     {
         var expected = Math.Max(1, (to - from) / WindowMs);
-        var covered = _db.Windows("cpu.total", from, to).Count;
+        var covered = db.Windows("cpu.total", from, to).Count;
         var offset = TimeZoneInfo.Local.GetUtcOffset(Fmt.Local(to));
-        md.AppendLine($"# Rapport MonitorKing — {_machine.MachineName}");
+        md.AppendLine($"# Rapport MonitorKing — {machine.Name}");
         md.AppendLine();
         md.AppendLine($"- **Période** : {Fmt.When(from)} → {Fmt.Time(to)} ({Fmt.Duration((to - from) / 1000.0)}), heure locale (UTC{(offset >= TimeSpan.Zero ? "+" : "-")}{offset:hh\\:mm})");
         md.AppendLine($"- **Généré le** : {Fmt.When(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())}");
-        md.AppendLine($"- **Couverture** : {covered} fenêtres de 10 s enregistrées sur {expected} ({Math.Min(100, covered * 100 / expected)} %) ; le reste du temps, l'agent ne tournait pas.");
-        md.AppendLine($"- **Mesures** : toutes les {_options.SampleIntervalMs / 1000.0:0.#} s, agrégées par fenêtres de 10 s (moyenne + pic) ; capteurs matériels toutes les {_options.SensorIntervalMs / 1000.0:0.#} s.");
+        md.AppendLine($"- **Couverture** : {covered} fenêtres de 10 s enregistrées sur {expected} ({Math.Min(100, covered * 100 / expected)} %) ; le reste du temps, l'agent ne tournait pas ou n'avait pas encore envoyé ses données.");
+        md.AppendLine($"- **Mesures** : toutes les {machine.SampleIntervalMs / 1000.0:0.#} s, agrégées par fenêtres de 10 s (moyenne + pic) ; capteurs matériels toutes les {machine.SensorIntervalMs / 1000.0:0.#} s.");
         md.AppendLine();
     }
 
-    private void Machine(StringBuilder md, Dictionary<string, MetricDef> defs)
+    private static void Machine(StringBuilder md, MachineSummary machine, Dictionary<string, MetricDef> defs)
     {
         var disks = defs.Keys
             .Where(k => k.StartsWith("disk.", StringComparison.Ordinal) && k.EndsWith(".active", StringComparison.Ordinal) && k != "disk.active")
@@ -90,14 +80,14 @@ public sealed class ReportBuilder
             .Select(k => defs[k].Label.Replace(" · activité", ""));
         md.AppendLine("## Machine");
         md.AppendLine();
-        md.AppendLine($"- **Système** : {_machine.Os}");
-        md.AppendLine($"- **Processeur** : {_machine.Cpu} ({_machine.LogicalCores} threads)");
-        md.AppendLine($"- **Mémoire** : {Fmt.Value(_machine.RamGb, "Go")}");
-        md.AppendLine($"- **Carte graphique** : {string.Join(", ", _machine.Gpus)}");
-        md.AppendLine($"- **Carte mère** : {_machine.Board}");
+        md.AppendLine($"- **Système** : {machine.Os}");
+        md.AppendLine($"- **Processeur** : {machine.Cpu} ({machine.LogicalCores} threads)");
+        md.AppendLine($"- **Mémoire** : {Fmt.Value(machine.RamGb, "Go")}");
+        md.AppendLine($"- **Carte graphique** : {string.Join(", ", machine.Gpus)}");
+        md.AppendLine($"- **Carte mère** : {machine.Board}");
         md.AppendLine($"- **Disques** : {string.Join(" ; ", disks)}");
-        md.AppendLine($"- **Allumé depuis** : {Fmt.Duration((DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - _machine.BootTime) / 1000.0)}");
-        md.AppendLine($"- **Agent** : MonitorKing v{_machine.AgentVersion}, droits administrateur : {(_machine.Administrator ? "oui" : "non")}");
+        md.AppendLine($"- **Allumé depuis** : {Fmt.Duration((DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - machine.BootTime) / 1000.0)}");
+        md.AppendLine($"- **Agent** : MonitorKing v{machine.AgentVersion}, droits administrateur : {(machine.Administrator ? "oui" : "non")}");
         md.AppendLine();
     }
 
@@ -112,7 +102,7 @@ public sealed class ReportBuilder
         md.AppendLine();
     }
 
-    private void Spikes(StringBuilder md, long from, long to, Dictionary<string, MetricDef> defs, Dictionary<string, string> descriptions)
+    private static void Spikes(StringBuilder md, Database db, long from, long to, Dictionary<string, MetricDef> defs, Dictionary<string, string> descriptions)
     {
         var targets = new List<(string Key, double Threshold, Func<(double Cpu, double Io, double Gpu), double> Value, Func<double, string> Format, double Floor, double Minimum)>
         {
@@ -126,9 +116,9 @@ public sealed class ReportBuilder
 
         // La minute qui suit un démarrage de l'agent (import des journaux, inventaire matériel) est écartée :
         // ce sont des pics que l'agent provoque lui-même.
-        var starts = _db.AgentStarts(from - StartupNoiseMs, to);
+        var starts = db.AgentStarts(from - StartupNoiseMs, to);
         bool AfterStart(long ts) => starts.Any(s => ts >= s && ts <= s + StartupNoiseMs);
-        var processWindows = _db.ProcessWindows(from, to).Where(p => !AfterStart(p.Ts)).ToList();
+        var processWindows = db.ProcessWindows(from, to).Where(p => !AfterStart(p.Ts)).ToList();
         var sections = new StringBuilder();
         var found = 0;
         if (starts.Count > 0)
@@ -139,7 +129,7 @@ public sealed class ReportBuilder
 
         foreach (var target in targets)
         {
-            var windows = _db.Windows(target.Key, from, to).Where(w => !AfterStart(w.Ts)).ToList();
+            var windows = db.Windows(target.Key, from, to).Where(w => !AfterStart(w.Ts)).ToList();
             var spikes = windows.Where(w => w.Max >= target.Threshold).Select(w => w.Ts).ToHashSet();
             if (spikes.Count == 0) continue;
             found++;
@@ -152,7 +142,7 @@ public sealed class ReportBuilder
 
             if (target.Key.EndsWith(".active", StringComparison.Ordinal) && target.Key.StartsWith("disk.", StringComparison.Ordinal))
             {
-                var latency = _db.Windows(target.Key.Replace(".active", ".latency"), from, to).ToDictionary(w => w.Ts, w => w.Avg);
+                var latency = db.Windows(target.Key.Replace(".active", ".latency"), from, to).ToDictionary(w => w.Ts, w => w.Avg);
                 var during = spikes.Where(latency.ContainsKey).Select(ts => latency[ts]).ToList();
                 var calmLatency = windows.Where(w => w.Max < target.Threshold * 0.6 && latency.ContainsKey(w.Ts)).Select(w => latency[w.Ts]).ToList();
                 if (during.Count > 0)
@@ -303,7 +293,7 @@ public sealed class ReportBuilder
         md.AppendLine();
     }
 
-    private void Events(StringBuilder md, WindowData window, long from, long to)
+    private static void Events(StringBuilder md, Database db, WindowData window, long to)
     {
         md.AppendLine("## Événements Windows pendant la période");
         md.AppendLine();
@@ -323,7 +313,7 @@ public sealed class ReportBuilder
         md.AppendLine();
         md.AppendLine("## Contexte : signalements des 7 jours précédant la fin de la période");
         md.AppendLine();
-        var summary = _db.EventSummary(to - 7L * 24 * 3600_000, to);
+        var summary = db.EventSummary(to - 7L * 24 * 3600_000, to);
         if (summary.Count == 0)
         {
             md.AppendLine("Aucun.");
@@ -359,7 +349,7 @@ public sealed class ReportBuilder
         md.AppendLine();
     }
 
-    private void Interpretation(StringBuilder md)
+    private static void Interpretation(StringBuilder md, MachineSummary machine)
     {
         md.AppendLine("## Pour interpréter");
         md.AppendLine();
@@ -367,7 +357,7 @@ public sealed class ReportBuilder
         md.AppendLine("- **Activité d'un disque** : part du temps avec au moins une opération en cours. Sur un SSD, 100 % ne veut pas dire saturé : regarder le temps de réponse (SSD < 5 ms, disque dur < 20 ms).");
         md.AppendLine("- **Hausse** : moyenne de l'application pendant les pics divisée par sa moyenne au calme ; c'est elle qui désigne le coupable d'un pic, pas le volume total.");
         md.AppendLine("- **Défauts durs** : pages relues sur le disque ; beaucoup de défauts durs avec une RAM pleine = Windows pagine.");
-        if (!_machine.Administrator)
+        if (!machine.Administrator)
             md.AppendLine("- L'agent tournait **sans droits administrateur** : pas de températures CPU/carte mère, pas de journal des temps de démarrage.");
         md.AppendLine();
         md.AppendLine("## Ce que j'ai remarqué");

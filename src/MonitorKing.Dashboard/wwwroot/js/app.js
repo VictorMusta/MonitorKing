@@ -1,11 +1,12 @@
-// Shell du dashboard : navigation par onglets (#hash), interrogation de l'agent toutes les 2 s, thème.
-import { api } from './api.js';
+// Shell du dashboard : navigation par onglets (#hash), interrogation régulière, thème.
+// Deux modes : « agent » (ce PC, en direct toutes les 2 s) et « serveur » (plusieurs PC, sélecteur, données à ~10-30 s).
+import { api, useMachine } from './api.js';
 import { store } from './store.js';
 import * as f from './format.js';
 import { icon } from './icons.js';
 import * as views from './views.js';
 
-const ROUTES = [
+const MACHINE_ROUTES = [
   { id: 'accueil', label: 'Accueil', view: views.home },
   { id: 'diagnostic', label: 'Pourquoi ça rame ?', view: views.diagnostic },
   { id: 'applications', label: 'Applications', view: views.applications },
@@ -16,11 +17,16 @@ const ROUTES = [
   { id: 'journal', label: 'Journal', view: views.journal },
   { id: 'historique', label: 'Historique', view: views.history },
 ];
+const FLEET_ROUTE = { id: 'parc', label: 'Mes PC', view: views.fleet };
 
 const main = document.querySelector('main');
 const tabs = document.getElementById('tabs');
 const live = document.getElementById('live');
 let current = null;
+let mode = 'agent';
+let machines = [];
+let pollTimer = null;
+let routes = MACHINE_ROUTES;
 
 let toastTimer = null;
 function toast(message) {
@@ -42,11 +48,16 @@ const ctx = {
   navigate: (route) => { location.hash = route; },
   toast,
   pickWidget: views.widgetPicker(document.getElementById('widget-dialog')),
+  get mode() { return mode; },
+  selectMachine: (id) => selectMachine(id, 'accueil'),
+  refreshMachines: async () => { machines = await api.machines(); renderMachinePicker(); return machines; },
 };
 
 function route() {
-  const id = location.hash.slice(1) || 'accueil';
-  const entry = ROUTES.find((r) => r.id === id) ?? ROUTES[0];
+  const fallback = mode === 'server' && !store.info ? 'parc' : 'accueil';
+  const id = location.hash.slice(1) || fallback;
+  let entry = routes.find((r) => r.id === id) ?? routes.find((r) => r.id === fallback) ?? routes[0];
+  if (entry.id !== 'parc' && mode === 'server' && !store.info) entry = FLEET_ROUTE; // aucun PC choisi
   try {
     current?.destroy?.();
   } catch (e) {
@@ -55,19 +66,25 @@ function route() {
   main.innerHTML = '';
   tabs.querySelectorAll('.tab').forEach((t) => (t.dataset.route === entry.id ? t.setAttribute('aria-current', 'page') : t.removeAttribute('aria-current')));
   current = entry.view(main, ctx);
-  if (store.latest) current?.update?.(store.latest);
+  if (store.latest && entry.id !== 'parc') current?.update?.(store.latest);
   document.title = `${entry.label} · MonitorKing`;
   window.scrollTo(0, 0);
 }
 
-function setLive(ok) {
-  live.innerHTML = ok
-    ? '<span class="live-dot"></span><span>En direct</span>'
-    : '<span class="live-dot stale"></span><span>Agent injoignable</span>';
+function setLive(state, text) {
+  const dot = state === 'ok' ? 'live-dot' : 'live-dot stale';
+  live.innerHTML = `<span class="${dot}"></span><span>${f.esc(text)}</span>`;
+}
+
+function liveLabel(snap) {
+  if (mode === 'agent') return ['ok', 'En direct'];
+  const age = (Date.now() - snap.ts) / 1000;
+  return age < 90 ? ['ok', `Reçu ${f.ago(snap.ts)}`] : ['stale', `Hors ligne · ${f.ago(snap.ts)}`];
 }
 
 function updateBadges(snap) {
   const tab = tabs.querySelector('[data-route="diagnostic"]');
+  if (!tab) return;
   const count = snap.hung.length;
   let badge = tab.querySelector('.badge');
   if (count && !badge) {
@@ -84,16 +101,22 @@ function updateBadges(snap) {
 }
 
 async function poll() {
+  clearTimeout(pollTimer);
+  if (mode === 'server' && !store.info) {
+    setLive('ok', `Serveur · ${machines.length} PC`);
+    pollTimer = setTimeout(poll, 10_000);
+    return;
+  }
   try {
     const snap = await api.live();
     store.push(snap);
-    setLive(true);
+    setLive(...liveLabel(snap));
     updateBadges(snap);
-    current?.update?.(snap);
+    if (!location.hash.startsWith('#parc')) current?.update?.(snap);
   } catch {
-    setLive(false);
+    setLive('stale', mode === 'agent' ? 'Agent injoignable' : 'Pas encore de données');
   } finally {
-    setTimeout(poll, 2000);
+    pollTimer = setTimeout(poll, mode === 'agent' ? 2000 : 10_000);
   }
 }
 
@@ -122,14 +145,64 @@ document.getElementById('theme').addEventListener('click', () => {
 });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(document.documentElement.dataset.theme));
 
-// ---- État des collecteurs (pied de page).
+// ---- En-tête : nom du PC (agent) ou sélecteur de PC (serveur).
+function renderMachinePicker() {
+  const box = document.querySelector('.machine');
+  if (mode === 'agent') {
+    box.innerHTML = `<strong>${f.esc(store.info.machineName)}</strong><span>${f.esc(`${store.info.os} · ${store.info.cpu}`)}</span>`;
+    return;
+  }
+  const selected = store.info?.machineId ?? '';
+  box.innerHTML = machines.length
+    ? `<select class="machine-select" aria-label="PC affiché">
+         ${selected ? '' : '<option value="" selected>Choisir un PC…</option>'}
+         ${machines.map((m) => `<option value="${f.esc(m.id)}" ${m.id === selected ? 'selected' : ''}>${m.online ? '● ' : '○ '}${f.esc(m.label)}</option>`).join('')}
+       </select>
+       <span>${store.info ? f.esc(`${store.info.os} · ${store.info.cpu}`) : 'Serveur central'}</span>`
+    : '<strong>Aucun PC inscrit</strong><span>Serveur central</span>';
+  box.querySelector('select')?.addEventListener('change', (e) => e.target.value && selectMachine(e.target.value));
+}
+
+async function selectMachine(id, nextRoute) {
+  useMachine(id);
+  store.reset();
+  try {
+    localStorage.setItem('mk-machine', id);
+  } catch {
+    // pas grave : on redemandera le PC la prochaine fois
+  }
+  try {
+    await store.init();
+    store.push(await api.live());
+  } catch {
+    // PC inscrit mais encore sans données : les vues afficheront leurs états vides.
+  }
+  renderMachinePicker();
+  renderFooter();
+  if (nextRoute && location.hash !== `#${nextRoute}`) location.hash = nextRoute; // hashchange affichera la vue
+  else route();
+  poll();
+}
+
+// ---- Pied de page.
 function renderFooter() {
+  const footer = document.getElementById('footer');
+  if (mode === 'server') {
+    footer.innerHTML = store.info
+      ? `<span>Serveur MonitorKing · ${f.esc(store.info.machineName)} · agent v${f.esc(store.info.agentVersion)}</span>
+         <span>Confidentialité : ${store.info.privacyMode === 'complet' ? 'partage complet (temporaire)' : 'mode discret, applications pseudonymisées'}</span>
+         <span>Données conservées ${store.info.retentionDays} jours</span>`
+      : '<span>Serveur MonitorKing</span>';
+    return;
+  }
   const i = store.info;
-  document.getElementById('footer').innerHTML = `
+  footer.innerHTML = `
     <span>MonitorKing v${f.esc(i.agentVersion)} · lecture seule</span>
     <span title="${f.esc(i.dataPath)}">Données locales, conservées ${i.retentionDays} jours</span>
+    <button id="show-privacy">Confidentialité et envoi</button>
     <button id="show-status">État des collecteurs</button>`;
   document.getElementById('show-status').addEventListener('click', showStatus);
+  document.getElementById('show-privacy').addEventListener('click', () => views.showPrivacy(document.getElementById('status-dialog'), ctx));
 }
 
 async function showStatus() {
@@ -151,14 +224,24 @@ async function showStatus() {
   dialog.showModal();
 }
 
+async function detectMode() {
+  for (;;) {
+    try {
+      return (await api.mode()).mode;
+    } catch {
+      setLive('stale', 'Connexion…');
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+}
+
 async function waitForAgent() {
   for (;;) {
     try {
-      const snap = await api.live();
-      store.push(snap);
+      store.push(await api.live());
       return;
     } catch {
-      setLive(false);
+      setLive('stale', 'Agent injoignable');
       await new Promise((r) => setTimeout(r, 1500));
     }
   }
@@ -166,16 +249,39 @@ async function waitForAgent() {
 
 async function start() {
   applyTheme(document.documentElement.dataset.theme);
-  tabs.innerHTML = ROUTES.map((r) => `<a class="tab" href="#${r.id}" data-route="${r.id}">${f.esc(r.label)}</a>`).join('');
+  mode = await detectMode();
+  routes = mode === 'server' ? [FLEET_ROUTE, ...MACHINE_ROUTES] : MACHINE_ROUTES;
+  tabs.innerHTML = routes.map((r) => `<a class="tab" href="#${r.id}" data-route="${r.id}">${f.esc(r.label)}</a>`).join('');
+  window.addEventListener('hashchange', route);
+
+  if (mode === 'server') {
+    machines = await api.machines().catch(() => []);
+    let saved = null;
+    try {
+      saved = localStorage.getItem('mk-machine');
+    } catch {
+      saved = null;
+    }
+    const initial = machines.find((m) => m.id === saved) ?? machines[0];
+    if (initial) {
+      await selectMachine(initial.id);
+    } else {
+      renderMachinePicker();
+      renderFooter();
+      route();
+      poll();
+    }
+    setInterval(() => ctx.refreshMachines().catch(() => {}), 60_000);
+    return;
+  }
+
   await waitForAgent();
   await store.init();
-  document.getElementById('machine-name').textContent = store.info.machineName;
-  document.getElementById('machine-os').textContent = `${store.info.os} · ${store.info.cpu}`;
+  renderMachinePicker();
   renderFooter();
-  setLive(true);
-  window.addEventListener('hashchange', route);
+  setLive('ok', 'En direct');
   route();
-  setTimeout(poll, 2000);
+  pollTimer = setTimeout(poll, 2000);
   setInterval(() => store.refreshMeta().catch(() => {}), 30_000);
 }
 

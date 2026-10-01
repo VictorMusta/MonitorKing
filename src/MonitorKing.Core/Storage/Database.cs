@@ -1,10 +1,14 @@
 using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 
-namespace MonitorKing.Agent.Storage;
+namespace MonitorKing.Core.Storage;
+
+/// <summary>Application vue sur la machine : sert à décider ce qui reste lisible en mode discret.</summary>
+public sealed record AppInfo(string Name, string? Path, string? Description, bool System);
 
 /// <summary>
-/// Stockage local (SQLite). Les mesures sont agrégées par fenêtres de 10 s (moyenne + max) ;
+/// Stockage SQLite d'une machine (côté agent : la machine locale ; côté serveur : un fichier par PC inscrit).
+/// Les mesures sont agrégées par fenêtres de 10 s (moyenne + max) ;
 /// les applications ne sont gardées que si elles figurent parmi les plus gourmandes de la fenêtre.
 /// </summary>
 public sealed class Database
@@ -12,13 +16,10 @@ public sealed class Database
     private readonly string _connectionString;
     private readonly ConcurrentDictionary<string, long> _metricIds = new();
 
-    public Database(AgentOptions options)
+    public Database(string path)
     {
-        var directory = string.IsNullOrWhiteSpace(options.DataDirectory)
-            ? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MonitorKing")
-            : Environment.ExpandEnvironmentVariables(options.DataDirectory);
-        Directory.CreateDirectory(directory);
-        Path = System.IO.Path.Combine(directory, "monitorking.db");
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
+        Path = path;
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = Path,
@@ -108,6 +109,17 @@ public sealed class Database
                 json TEXT NOT NULL,
                 updated_ts INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS kv (
+                k TEXT PRIMARY KEY,
+                v TEXT
+            );
+            CREATE TABLE IF NOT EXISTS app (
+                name TEXT PRIMARY KEY,
+                path TEXT,
+                description TEXT,
+                system INTEGER NOT NULL,
+                updated_ts INTEGER NOT NULL
+            );
             -- Un gel encore ouvert au démarrage date d'une session précédente : sa fin est inconnue.
             UPDATE hang SET end_ts = -1 WHERE end_ts IS NULL;
             -- Les événements informatifs (ex. « volume sain ») ne sont pas des problèmes.
@@ -158,6 +170,12 @@ public sealed class Database
             }
         }
 
+        InsertProcesses(connection, transaction, ts, processes);
+        transaction.Commit();
+    }
+
+    private static void InsertProcesses(SqliteConnection connection, SqliteTransaction transaction, long ts, IEnumerable<ProcRow> processes)
+    {
         using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
@@ -195,8 +213,6 @@ public sealed class Database
                 command.ExecuteNonQuery();
             }
         }
-
-        transaction.Commit();
     }
 
     /// <summary>Série d'une métrique, regroupée en au plus <paramref name="maxPoints"/> points.</summary>
@@ -524,6 +540,280 @@ public sealed class Database
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT MIN(ts) FROM proc_sample";
         return command.ExecuteScalar() is long value ? value : null;
+    }
+
+    // ------------------------------------------------------------------ Réglages (clé/valeur)
+
+    public string? Get(string key)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT v FROM kv WHERE k = $k";
+        command.Parameters.AddWithValue("$k", key);
+        return command.ExecuteScalar() as string;
+    }
+
+    public void Set(string key, string? value)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = value is null
+            ? "DELETE FROM kv WHERE k = $k"
+            : "INSERT INTO kv (k, v) VALUES ($k, $v) ON CONFLICT(k) DO UPDATE SET v = excluded.v";
+        command.Parameters.AddWithValue("$k", key);
+        if (value is not null) command.Parameters.AddWithValue("$v", value);
+        command.ExecuteNonQuery();
+    }
+
+    // ------------------------------------------------------------------ Catalogue des applications
+
+    public void UpsertApp(string name, string? path, string? description, bool system)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO app (name, path, description, system, updated_ts) VALUES ($name, $path, $description, $system, $ts)
+            ON CONFLICT(name) DO UPDATE SET path = COALESCE(excluded.path, app.path),
+                description = COALESCE(excluded.description, app.description), system = excluded.system, updated_ts = excluded.updated_ts
+            """;
+        command.Parameters.AddWithValue("$name", name);
+        command.Parameters.AddWithValue("$path", (object?)path ?? DBNull.Value);
+        command.Parameters.AddWithValue("$description", (object?)description ?? DBNull.Value);
+        command.Parameters.AddWithValue("$system", system ? 1 : 0);
+        command.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        command.ExecuteNonQuery();
+    }
+
+    public List<AppInfo> Apps()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name, path, description, system FROM app ORDER BY name";
+        var list = new List<AppInfo>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            list.Add(new AppInfo(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt64(3) == 1));
+        return list;
+    }
+
+    // ------------------------------------------------------------------ Synchronisation agent → serveur
+
+    public List<MetricDef> KnownMetrics()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT key, label, unit, grp, max FROM metric ORDER BY grp, key";
+        var list = new List<MetricDef>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            list.Add(new MetricDef(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetDouble(4)));
+        return list;
+    }
+
+    /// <summary>Horodatages des prochaines fenêtres à envoyer (au plus <paramref name="limit"/>).</summary>
+    public List<long> WindowsAfter(long ts, int limit)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT DISTINCT ts FROM sample WHERE ts > $ts ORDER BY ts LIMIT $limit";
+        command.Parameters.AddWithValue("$ts", ts);
+        command.Parameters.AddWithValue("$limit", limit);
+        var list = new List<long>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) list.Add(reader.GetInt64(0));
+        return list;
+    }
+
+    public List<(string Key, long Ts, double Avg, double Max)> SamplesBetween(long fromExclusive, long toInclusive)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT m.key, s.ts, s.avg, s.max FROM sample s JOIN metric m ON m.id = s.metric_id
+            WHERE s.ts > $from AND s.ts <= $to ORDER BY s.ts
+            """;
+        command.Parameters.AddWithValue("$from", fromExclusive);
+        command.Parameters.AddWithValue("$to", toInclusive);
+        var list = new List<(string, long, double, double)>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) list.Add((reader.GetString(0), reader.GetInt64(1), reader.GetDouble(2), reader.GetDouble(3)));
+        return list;
+    }
+
+    public List<(long Ts, ProcRow Row)> ProcessRowsBetween(long fromExclusive, long toInclusive)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT ts, name, description, via, cpu, ram_mb, commit_mb, io_read, io_write, hard_faults, gpu, vram_mb, count
+            FROM proc_sample WHERE ts > $from AND ts <= $to ORDER BY ts
+            """;
+        command.Parameters.AddWithValue("$from", fromExclusive);
+        command.Parameters.AddWithValue("$to", toInclusive);
+        var list = new List<(long, ProcRow)>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add((reader.GetInt64(0), new ProcRow
+            {
+                Name = reader.GetString(1),
+                Description = reader.IsDBNull(2) ? null : reader.GetString(2),
+                Via = reader.IsDBNull(3) ? null : reader.GetString(3),
+                Cpu = reader.GetDouble(4),
+                RamMb = reader.GetDouble(5),
+                CommitMb = reader.GetDouble(6),
+                IoReadBps = reader.GetDouble(7),
+                IoWriteBps = reader.GetDouble(8),
+                HardFaultsPerSec = reader.GetDouble(9),
+                Gpu = reader.GetDouble(10),
+                VramMb = reader.GetDouble(11),
+                Count = reader.GetInt32(12),
+            }));
+        }
+
+        return list;
+    }
+
+    public List<(long Id, EventItem Event)> EventsAfterId(long id, int limit)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, ts, log, provider, event_id, level, kind, title, message, record_id
+            FROM event WHERE id > $id ORDER BY id LIMIT $limit
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$limit", limit);
+        var list = new List<(long, EventItem)>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add((reader.GetInt64(0), new EventItem
+            {
+                Ts = reader.GetInt64(1),
+                Log = reader.GetString(2),
+                Provider = reader.GetString(3),
+                EventId = reader.GetInt32(4),
+                Level = reader.GetInt32(5),
+                Kind = reader.GetString(6),
+                Title = reader.GetString(7),
+                Message = reader.IsDBNull(8) ? null : reader.GetString(8),
+                RecordId = reader.GetInt64(9),
+            }));
+        }
+
+        return list;
+    }
+
+    /// <summary>Gels commencés ou terminés après un instant (pour renvoyer leur fin au serveur).</summary>
+    public List<HangItem> HangsChangedSince(long ts)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, start_ts, end_ts, pid, process, title FROM hang
+            WHERE start_ts > $ts OR end_ts > $ts ORDER BY id LIMIT 500
+            """;
+        command.Parameters.AddWithValue("$ts", ts);
+        var list = new List<HangItem>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            long? end = reader.IsDBNull(2) ? null : reader.GetInt64(2);
+            list.Add(new HangItem(reader.GetInt64(0), reader.GetInt64(1), end is -1 ? null : end, reader.GetInt32(3), reader.GetString(4), reader.GetString(5)));
+        }
+
+        return list;
+    }
+
+    /// <summary>Côté serveur : intègre un lot reçu d'un agent. Rejouer le même lot ne crée pas de doublon.</summary>
+    public void Import(
+        IReadOnlyCollection<MetricDef> definitions,
+        IReadOnlyCollection<(string Key, long Ts, double Avg, double Max)> samples,
+        IReadOnlyCollection<(long Ts, ProcRow Row)> processes,
+        IReadOnlyCollection<EventItem> events,
+        IReadOnlyCollection<HangItem> hangs)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        var defs = definitions.ToDictionary(d => d.Key);
+
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "INSERT OR REPLACE INTO sample (metric_id, ts, avg, max) VALUES ($id, $ts, $avg, $max)";
+            var id = command.Parameters.Add("$id", SqliteType.Integer);
+            var ts = command.Parameters.Add("$ts", SqliteType.Integer);
+            var avg = command.Parameters.Add("$avg", SqliteType.Real);
+            var max = command.Parameters.Add("$max", SqliteType.Real);
+            foreach (var s in samples)
+            {
+                id.Value = MetricId(connection, transaction, defs.GetValueOrDefault(s.Key) ?? new MetricDef(s.Key, s.Key, "", "other"));
+                ts.Value = s.Ts;
+                avg.Value = s.Avg;
+                max.Value = s.Max;
+                command.ExecuteNonQuery();
+            }
+        }
+
+        foreach (var def in defs.Values) MetricId(connection, transaction, def);
+
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM proc_sample WHERE ts = $ts";
+            var ts = command.Parameters.Add("$ts", SqliteType.Integer);
+            foreach (var windowTs in processes.Select(p => p.Ts).Distinct())
+            {
+                ts.Value = windowTs;
+                command.ExecuteNonQuery();
+            }
+        }
+
+        foreach (var group in processes.GroupBy(p => p.Ts))
+            InsertProcesses(connection, transaction, group.Key, group.Select(p => p.Row));
+
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT OR IGNORE INTO event (ts, log, provider, event_id, level, kind, title, message, record_id)
+                VALUES ($ts, $log, $provider, $eventId, $level, $kind, $title, $message, $recordId)
+                """;
+            foreach (var e in events)
+            {
+                command.Parameters.Clear();
+                command.Parameters.AddWithValue("$ts", e.Ts);
+                command.Parameters.AddWithValue("$log", e.Log);
+                command.Parameters.AddWithValue("$provider", e.Provider);
+                command.Parameters.AddWithValue("$eventId", e.EventId);
+                command.Parameters.AddWithValue("$level", e.Level);
+                command.Parameters.AddWithValue("$kind", e.Kind);
+                command.Parameters.AddWithValue("$title", e.Title);
+                command.Parameters.AddWithValue("$message", (object?)e.Message ?? DBNull.Value);
+                command.Parameters.AddWithValue("$recordId", e.RecordId);
+                command.ExecuteNonQuery();
+            }
+        }
+
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "INSERT OR REPLACE INTO hang (id, start_ts, end_ts, pid, process, title) VALUES ($id, $start, $end, $pid, $process, $title)";
+            foreach (var h in hangs)
+            {
+                command.Parameters.Clear();
+                command.Parameters.AddWithValue("$id", h.Id);
+                command.Parameters.AddWithValue("$start", h.Start);
+                command.Parameters.AddWithValue("$end", (object?)h.End ?? DBNull.Value);
+                command.Parameters.AddWithValue("$pid", h.Pid);
+                command.Parameters.AddWithValue("$process", h.Process);
+                command.Parameters.AddWithValue("$title", h.Title);
+                command.ExecuteNonQuery();
+            }
+        }
+
+        transaction.Commit();
     }
 
     public void ApplyRetention(long samplesBefore, long eventsBefore)

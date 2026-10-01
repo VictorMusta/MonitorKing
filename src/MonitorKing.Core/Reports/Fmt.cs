@@ -1,9 +1,9 @@
 using System.Globalization;
 
-namespace MonitorKing.Agent.Reports;
+namespace MonitorKing.Core.Reports;
 
 /// <summary>Formats français pour les rapports (mêmes conventions que le dashboard).</summary>
-internal static class Fmt
+public static class Fmt
 {
     private static readonly CultureInfo Fr = CultureInfo.GetCultureInfo("fr-FR");
 
