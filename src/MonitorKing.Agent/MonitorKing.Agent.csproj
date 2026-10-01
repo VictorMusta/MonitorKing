@@ -7,6 +7,10 @@
     <PlatformTarget>x64</PlatformTarget>
     <!-- Agent installé (Release) : aucune fenêtre, il tourne en arrière-plan. En Debug, dotnet run garde la console et ses journaux. -->
     <OutputType Condition="'$(Configuration)' == 'Release'">WinExe</OutputType>
+    <!-- Ramasse-miettes « station de travail » : celui « serveur » (défaut d'une appli web) garde un tas par cœur
+         et rend peu la mémoire ; l'agent montait à ~1 Go sur un processeur 16 threads. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <!-- Les releases remplacent ce numéro par celui du tag (voir .github/workflows/release-agent.yml). -->
     <Version>0.3.1</Version>
     <SatelliteResourceLanguages>fr;en</SatelliteResourceLanguages>

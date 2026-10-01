@@ -607,7 +607,7 @@ public sealed class Database
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT MAX(ts) FROM sample WHERE ts < $ts";
+        command.CommandText = "SELECT MAX(ts) FROM proc_sample WHERE ts < $ts"; // index par instant (voir WindowsAfter)
         command.Parameters.AddWithValue("$ts", ts);
         return command.ExecuteScalar() is long value ? value : null;
     }
@@ -725,12 +725,16 @@ public sealed class Database
         return list;
     }
 
-    /// <summary>Horodatages des prochaines fenêtres à envoyer (au plus <paramref name="limit"/>).</summary>
+    /// <summary>
+    /// Horodatages des prochaines fenêtres à envoyer (au plus <paramref name="limit"/>). Lus dans proc_sample,
+    /// indexée par instant (chaque fenêtre y a ses applications) : sample est rangée par métrique, y chercher
+    /// un instant parcourrait toute la table, et ce toutes les 15 s.
+    /// </summary>
     public List<long> WindowsAfter(long ts, int limit)
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT DISTINCT ts FROM sample WHERE ts > $ts ORDER BY ts LIMIT $limit";
+        command.CommandText = "SELECT DISTINCT ts FROM proc_sample WHERE ts > $ts ORDER BY ts LIMIT $limit";
         command.Parameters.AddWithValue("$ts", ts);
         command.Parameters.AddWithValue("$limit", limit);
         var list = new List<long>();
@@ -744,7 +748,7 @@ public sealed class Database
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT m.key, s.ts, s.avg, s.max FROM sample s JOIN metric m ON m.id = s.metric_id
+            SELECT m.key, s.ts, s.avg, s.max FROM metric m CROSS JOIN sample s ON s.metric_id = m.id
             WHERE s.ts > $from AND s.ts <= $to ORDER BY s.ts
             """;
         command.Parameters.AddWithValue("$from", fromExclusive);
@@ -969,8 +973,9 @@ public sealed class Database
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
+        // sample est rangée par (métrique, instant) : on purge métrique par métrique plutôt que de tout parcourir.
         command.CommandText = """
-            DELETE FROM sample WHERE ts < $samples;
+            DELETE FROM sample WHERE metric_id IN (SELECT id FROM metric) AND ts < $samples;
             DELETE FROM proc_sample WHERE ts < $samples;
             DELETE FROM hang WHERE start_ts < $events;
             DELETE FROM event WHERE ts < $events;
