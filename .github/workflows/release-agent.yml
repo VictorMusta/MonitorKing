@@ -1,0 +1,51 @@
+# Fabrique l'agent Windows prêt à installer (autonome : .NET inclus) et le publie dans une Release GitHub.
+# Déclenchement : pousser un tag de version, par exemple « git tag v0.3.0 && git push origin v0.3.0 ».
+name: Release de l'agent
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  agent:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Compiler toute la solution (agent, serveur, moteur commun)
+        run: dotnet build MonitorKing.sln -c Release
+
+      - name: Publier l'agent autonome (Windows x64)
+        run: dotnet publish src/MonitorKing.Agent -c Release -r win-x64 --self-contained true -o out/MonitorKing-Agent
+
+      - name: Ajouter le script d'inscription et zipper
+        shell: pwsh
+        run: |
+          Copy-Item deploy/agent/inscription.cmd out/MonitorKing-Agent/
+          Compress-Archive -Path out/MonitorKing-Agent -DestinationPath "MonitorKing-Agent-${{ github.ref_name }}-win-x64.zip"
+
+      - name: Créer la release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "MonitorKing-Agent-${{ github.ref_name }}-win-x64.zip"
+          $notes = @"
+          Agent MonitorKing pour Windows 10/11 64 bits, .NET inclus : rien à installer.
+
+          1. Dézipper le dossier (par exemple dans C:\MonitorKing).
+          2. Double-cliquer sur inscription.cmd et saisir le code d'inscription.
+             Windows peut afficher « Windows a protégé votre ordinateur » (exécutable non signé) :
+             Informations complémentaires → Exécuter quand même.
+          3. Le tableau de bord local s'ouvre sur http://localhost:5757.
+
+          Par défaut, les noms des applications partent sous pseudonyme (mode discret).
+          "@
+          gh release create "${{ github.ref_name }}" $zip --title "MonitorKing ${{ github.ref_name }}" --notes $notes

@@ -30,13 +30,15 @@ Puis ouvrir <http://localhost:5757>. Prérequis : SDK .NET 8, Windows 10/11. Les
 
 - **Mode discret (par défaut)** : tout le détail reste sur le PC. Vers le serveur partent les mesures, les composants de Windows en clair (ce qui est installé sous `C:\Windows`, Defender…) et les autres applications **sous pseudonyme** (« Appli 7F3A9C », calculé avec une clé qui ne quitte jamais le PC). Ni titres de fenêtres, ni nom du Wi-Fi, ni messages Windows (chemins, noms d'utilisateur).
 - **Retrouver une application** : sur le PC, *Confidentialité et envoi* (pied de page) donne la correspondance pseudonyme → application.
+- **Clé de lecture (chiffrement de bout en bout)** : les vrais noms partent aussi, chiffrés en AES-256-GCM avec une clé qui reste sur le PC ; le serveur ne peut pas les lire. Si la personne donne sa clé (même fenêtre *Confidentialité et envoi*), le dashboard du serveur déchiffre les noms **dans le navigateur** (bouton *Noms masqués* en haut). Renouveler la clé retire l'accès.
 - **Partage complet** : activable seulement depuis le PC, pour 1 h ou 24 h, puis retour automatique au mode discret.
 - **Lecture seule** : l'agent n'exécute jamais de commande reçue ; le serveur ne peut rien lui demander. La connexion part toujours du PC.
 
 ## Inscrire un PC sur le serveur
 
 1. Dans le dashboard du serveur, *Mes PC* → *Ajouter un PC* → nom du PC → un code à usage unique (24 h).
-2. Sur le PC, lancer l'agent une première fois avec l'adresse du serveur et le code :
+2. **PC sans outils de développement** : télécharger le zip de l'agent dans les [Releases](https://github.com/VictorMusta/MonitorKing/releases) (.NET inclus), le dézipper, double-cliquer sur `inscription.cmd` et saisir le code. Chaque tag `v*` poussé sur GitHub produit cette release automatiquement (`.github/workflows/release-agent.yml`).
+3. **Depuis le code source**, lancer l'agent une première fois avec l'adresse du serveur et le code :
 
 ```bash
 dotnet run --project src/MonitorKing.Agent -- --MonitorKing:Server:Url=https://monitorking.example.duckdns.org --MonitorKing:Server:EnrollmentCode=ABCD-EFGH
@@ -50,7 +52,9 @@ Le PC garde ensuite son propre jeton (le code ne sert plus) et envoie ses donné
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-Le conteneur écoute sur `127.0.0.1:8095`. Le bloc [deploy/Caddyfile.monitorking](deploy/Caddyfile.monitorking) protège le dashboard par mot de passe (`caddy hash-password`) et laisse passer uniquement `/enroll` et `/ingest/*` vers les agents. Données dans le volume `monitorking_data` (30 jours de mesures).
+Le conteneur écoute sur `127.0.0.1:8095`. Le bloc [deploy/Caddyfile.monitorking](deploy/Caddyfile.monitorking) protège le dashboard par mot de passe et laisse passer uniquement `/enroll` et `/ingest/*` vers les agents. Données dans le volume `monitorking_data` (30 jours de mesures).
+
+Changer le mot de passe du dashboard : installer [deploy/change-password.sh](deploy/change-password.sh) sur le serveur (`/usr/local/bin/monitorking-password`), puis `ssh -t root@serveur monitorking-password` ; le mot de passe est saisi sur le serveur et seul son hash est écrit.
 
 ## Architecture
 

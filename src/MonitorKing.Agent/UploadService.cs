@@ -127,7 +127,6 @@ public sealed class UploadService : BackgroundService
         var processes = windows.Count > 0 ? _db.ProcessRowsBetween(samplesCursor, upTo) : new();
         var events = _db.EventsAfterId(eventsCursor, EventsPerBatch);
         var hangs = _db.HangsChangedSince(hangsCursor);
-        if (windows.Count == 0 && events.Count == 0 && hangs.Count == 0) return false;
 
         var keys = samples.Select(s => s.Key).ToHashSet();
         var definitions = _machine.Definitions.Where(d => keys.Contains(d.Key)).ToList();
@@ -135,15 +134,23 @@ public sealed class UploadService : BackgroundService
         if (!_privacy.SharesEverything)
             summary = summary with { Name = _db.Get(LabelKey) ?? "PC" };
 
+        var outgoingProcesses = processes.Select(p => new ProcessDto(p.Ts, _privacy.Outgoing(p.Row))).ToList();
+        var outgoingEvents = events.Select(e => _privacy.Outgoing(e.Event)).ToList();
+        var outgoingHangs = hangs.Select(_privacy.Outgoing).ToList();
+        // Les pseudonymes produits ci-dessus partent aussi sous forme chiffrée (lisibles seulement avec la clé du PC).
+        var seals = _privacy.PendingSeals();
+        if (windows.Count == 0 && events.Count == 0 && hangs.Count == 0 && seals.Count == 0) return false;
+
         var batch = new UploadBatch(
             1,
             _privacy.Mode,
             summary,
             definitions,
             samples.Select(s => new SampleDto(s.Key, s.Ts, s.Avg, s.Max)).ToList(),
-            processes.Select(p => new ProcessDto(p.Ts, _privacy.Outgoing(p.Row))).ToList(),
-            events.Select(e => _privacy.Outgoing(e.Event)).ToList(),
-            hangs.Select(_privacy.Outgoing).ToList());
+            outgoingProcesses,
+            outgoingEvents,
+            outgoingHangs,
+            seals);
 
         using var client = _http.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(60);
@@ -162,6 +169,7 @@ public sealed class UploadService : BackgroundService
 
         response.EnsureSuccessStatusCode();
 
+        _privacy.ConfirmSeals(seals);
         _db.Set(SamplesCursorKey, upTo.ToString());
         if (events.Count > 0) _db.Set(EventsCursorKey, events[^1].Id.ToString());
         if (hangs.Count > 0) _db.Set(HangsCursorKey, hangs.Max(h => Math.Max(h.Start, h.End ?? h.Start)).ToString());

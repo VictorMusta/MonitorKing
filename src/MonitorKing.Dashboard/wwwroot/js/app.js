@@ -5,6 +5,7 @@ import { store } from './store.js';
 import * as f from './format.js';
 import { icon } from './icons.js';
 import * as views from './views.js';
+import * as names from './names.js';
 
 const MACHINE_ROUTES = [
   { id: 'accueil', label: 'Accueil', view: views.home },
@@ -165,6 +166,7 @@ function renderMachinePicker() {
 
 async function selectMachine(id, nextRoute) {
   useMachine(id);
+  names.setActive(id);
   store.reset();
   try {
     localStorage.setItem('mk-machine', id);
@@ -177,12 +179,80 @@ async function selectMachine(id, nextRoute) {
   } catch {
     // PC inscrit mais encore sans données : les vues afficheront leurs états vides.
   }
+  // Clé de lecture déjà fournie pour ce PC : on redéchiffre les noms sans rien demander.
+  const saved = names.savedKey(id);
+  if (saved && !names.isUnlocked(id)) {
+    await names.unlock(id, saved, false).catch(() => {});
+  }
   renderMachinePicker();
+  renderNamesButton();
   renderFooter();
   if (nextRoute && location.hash !== `#${nextRoute}`) location.hash = nextRoute; // hashchange affichera la vue
   else route();
   poll();
 }
+
+// ---- Noms des applications (serveur) : masqués par défaut, déchiffrables avec la clé du PC.
+const namesButton = document.getElementById('names');
+
+function renderNamesButton() {
+  if (mode !== 'server' || !store.info) {
+    namesButton.hidden = true;
+    return;
+  }
+  const unlocked = names.isUnlocked(store.info.machineId);
+  namesButton.hidden = false;
+  namesButton.classList.toggle('unlocked', unlocked);
+  namesButton.innerHTML = `${icon(unlocked ? 'ok' : 'lock', 13)} ${unlocked ? 'Noms visibles' : 'Noms masqués'}`;
+  namesButton.title = unlocked
+    ? 'Les vrais noms des applications de ce PC sont déchiffrés dans ce navigateur.'
+    : 'Les applications de ce PC apparaissent sous pseudonyme. Clique pour fournir sa clé de lecture.';
+}
+
+namesButton.addEventListener('click', () => {
+  const id = store.info?.machineId;
+  if (!id) return;
+  const dialog = document.getElementById('status-dialog');
+  const unlocked = names.isUnlocked(id);
+  dialog.innerHTML = `
+    <form method="dialog">
+      <div class="dlg-head"><h2>Noms des applications · ${f.esc(store.info.machineName)}</h2><button class="icon-btn" value="close" aria-label="Fermer">${icon('close', 16)}</button></div>
+      <div class="dlg-body">
+        ${unlocked
+          ? '<p>Les vrais noms de ce PC sont visibles dans ce navigateur. Ils ont été déchiffrés ici : le serveur, lui, ne les connaît pas.</p>'
+          : `<p>Ce PC envoie ses applications sous pseudonyme (« Appli 7F3A9C »). Leurs vrais noms sont stockés <b>chiffrés</b> sur le serveur, qui ne peut pas les lire.</p>
+             <p class="secondary">Pour les voir, colle la <b>clé de lecture</b> du PC. La personne la trouve dans son tableau de bord local (pied de page → <i>Confidentialité et envoi</i>) et choisit de te la donner ou non. Si elle la renouvelle, l'accès est retiré.</p>
+             <div class="field"><label for="read-key">Clé de lecture</label><input id="read-key" type="password" autocomplete="off" spellcheck="false" placeholder="Colle la clé ici"></div>
+             <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="remember-key" checked> Mémoriser la clé dans ce navigateur</label>
+             <p class="sev-critical" data-error hidden></p>`}
+      </div>
+      <div class="dlg-foot">
+        ${unlocked
+          ? '<button type="button" class="btn" data-act="forget">Masquer à nouveau et oublier la clé</button>'
+          : '<button type="button" class="btn primary" data-act="unlock">Déchiffrer les noms</button>'}
+      </div>
+    </form>`;
+  dialog.querySelector('[data-act="forget"]')?.addEventListener('click', () => {
+    names.forget(id);
+    dialog.close();
+    renderNamesButton();
+    route();
+  });
+  dialog.querySelector('[data-act="unlock"]')?.addEventListener('click', async () => {
+    const error = dialog.querySelector('[data-error]');
+    try {
+      const count = await names.unlock(id, dialog.querySelector('#read-key').value, dialog.querySelector('#remember-key').checked);
+      dialog.close();
+      renderNamesButton();
+      route();
+      toast(`${count} nom(s) d'application déchiffré(s).`);
+    } catch (e) {
+      error.textContent = e.message;
+      error.hidden = false;
+    }
+  });
+  dialog.showModal();
+});
 
 // ---- Pied de page.
 function renderFooter() {

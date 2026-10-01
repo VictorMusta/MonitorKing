@@ -113,6 +113,11 @@ public sealed class Database
                 k TEXT PRIMARY KEY,
                 v TEXT
             );
+            CREATE TABLE IF NOT EXISTS sealed_name (
+                pseudonym TEXT PRIMARY KEY,
+                sealed TEXT NOT NULL,
+                updated_ts INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS app (
                 name TEXT PRIMARY KEY,
                 path TEXT,
@@ -726,17 +731,49 @@ public sealed class Database
         return list;
     }
 
+    /// <summary>Côté serveur : noms chiffrés reçus (illisibles sans la clé du PC), par pseudonyme.</summary>
+    public List<(string Pseudonym, string Sealed)> SealedNames()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT pseudonym, sealed FROM sealed_name ORDER BY pseudonym";
+        var list = new List<(string, string)>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) list.Add((reader.GetString(0), reader.GetString(1)));
+        return list;
+    }
+
     /// <summary>Côté serveur : intègre un lot reçu d'un agent. Rejouer le même lot ne crée pas de doublon.</summary>
     public void Import(
         IReadOnlyCollection<MetricDef> definitions,
         IReadOnlyCollection<(string Key, long Ts, double Avg, double Max)> samples,
         IReadOnlyCollection<(long Ts, ProcRow Row)> processes,
         IReadOnlyCollection<EventItem> events,
-        IReadOnlyCollection<HangItem> hangs)
+        IReadOnlyCollection<HangItem> hangs,
+        IReadOnlyCollection<(string Pseudonym, string Sealed)>? sealedNames = null)
     {
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
         var defs = definitions.ToDictionary(d => d.Key);
+
+        if (sealedNames is { Count: > 0 })
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO sealed_name (pseudonym, sealed, updated_ts) VALUES ($pseudonym, $sealed, $ts)
+                ON CONFLICT(pseudonym) DO UPDATE SET sealed = excluded.sealed, updated_ts = excluded.updated_ts
+                """;
+            var pseudonym = command.Parameters.Add("$pseudonym", SqliteType.Text);
+            var sealedValue = command.Parameters.Add("$sealed", SqliteType.Text);
+            command.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            foreach (var (p, s) in sealedNames)
+            {
+                pseudonym.Value = p;
+                sealedValue.Value = s;
+                command.ExecuteNonQuery();
+            }
+        }
 
         using (var command = connection.CreateCommand())
         {

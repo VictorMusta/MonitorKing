@@ -44,7 +44,11 @@ public static class Endpoints
                 batch.Samples.Select(s => (s.Key, s.Ts, s.Avg, s.Max)).ToList(),
                 batch.Processes.Select(p => (p.Ts, p.Row)).ToList(),
                 batch.Events,
-                batch.Hangs);
+                batch.Hangs,
+                batch.SealedNames?
+                    .Where(s => s.Pseudonym.Length <= 32 && s.Sealed.Length <= 4096)
+                    .Select(s => (s.Pseudonym, s.Sealed))
+                    .ToList());
             store.Touch(machineId, batch.Mode, batch.Summary);
             return Results.Ok(new { Received = batch.Samples.Count });
         });
@@ -152,6 +156,12 @@ public static class Endpoints
         });
 
         machine.MapGet("/status", () => Array.Empty<CollectorStatus>());
+
+        // Noms chiffrés : le navigateur les déchiffre lui-même avec la clé de lecture fournie par la personne du PC.
+        machine.MapGet("/sealed-names", (string id, ServerStore store) =>
+            store.Machine(id) is null
+                ? Results.NotFound()
+                : Results.Ok(store.DatabaseFor(id).SealedNames().Select(s => new { s.Pseudonym, s.Sealed }).ToList()));
 
         machine.MapGet("/metrics", (string id, ServerStore store) =>
             store.Machine(id) is { } record ? Results.Ok(Open(store, record).Definitions) : Results.NotFound());

@@ -1,4 +1,5 @@
 // Formats en français (espace insécable avant les unités, virgule décimale).
+import { realExe, realDescription } from './names.js';
 const nf0 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
 const nf1f = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -68,8 +69,13 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-/** Nom lisible d'une application : description si disponible, sinon l'exécutable. */
+/** Nom lisible d'une application : description si disponible, sinon l'exécutable (déchiffrés si la clé du PC est connue). */
 export function appName(p) {
-  const d = p.description && p.description.length <= 48 ? p.description : null;
-  return d || p.name;
+  const exe = realExe(p.name);
+  const description = exe ? realDescription(p.name) : p.description;
+  const d = description && description.length <= 48 ? description : null;
+  return d || exe || p.name;
 }
+
+/** Exécutable réel (si les noms ont été déchiffrés), sinon le nom reçu (éventuellement un pseudonyme). */
+export const exeName = (p) => realExe(p.name) ?? p.name;

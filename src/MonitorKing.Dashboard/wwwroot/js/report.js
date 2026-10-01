@@ -1,11 +1,13 @@
 // Rapports Markdown : à copier dans une conversation avec Claude, ou à télécharger.
 import { store } from './store.js';
 import { api } from './api.js';
+import { revealLong } from './names.js';
 
 async function fetchReport(params) {
   const response = await fetch(api.reportUrl(params));
   if (!response.ok) throw new Error(`Rapport indisponible (${response.status})`);
-  return response.text();
+  // Si la clé de lecture de ce PC a été fournie, les pseudonymes sont remplacés ici, dans le navigateur.
+  return revealLong(await response.text());
 }
 
 async function writeClipboard(text) {

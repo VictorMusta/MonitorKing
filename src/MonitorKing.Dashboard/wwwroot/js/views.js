@@ -6,6 +6,7 @@ import * as f from './format.js';
 import { icon, severityIcon } from './icons.js';
 import { catalog, mountWidget, renderDiagnosis, eventRow, processCell, RESOURCES, KIND_LABELS, SENSOR_TYPES } from './widgets.js';
 import { copyReport, downloadReport } from './report.js';
+import * as names from './names.js';
 
 const GROUP_LABELS = { cpu: 'Processeur', memory: 'Mémoire', disk: 'Disques', gpu: 'Carte graphique', network: 'Réseau', sensors: 'Capteurs' };
 
@@ -648,7 +649,7 @@ export function fleet(root, ctx) {
         <div class="verdict">
           <span class="sev-icon">${severityIcon(m.severity ?? 'info', 20)}</span>
           <div>
-            <h3 style="font-size:16px">${f.esc(m.verdict ?? 'En attente des premières données')}</h3>
+            <h3 style="font-size:16px">${f.esc(names.reveal(m.verdict, m.id) ?? 'En attente des premières données')}</h3>
             <p>${f.esc([m.os, m.cpu, m.ramGb ? f.value(m.ramGb, 'Go') : null].filter(Boolean).join(' · ') || 'Fiche de la machine pas encore reçue')}</p>
           </div>
         </div>
@@ -659,7 +660,18 @@ export function fleet(root, ctx) {
       </section>`).join('');
   };
 
-  const load = () => ctx.refreshMachines().then(render).catch((e) => ctx.toast(e.message));
+  const load = async () => {
+    try {
+      const machines = await ctx.refreshMachines();
+      // Clés de lecture mémorisées : les verdicts affichent les vrais noms des PC concernés.
+      await Promise.all(machines
+        .filter((m) => names.savedKey(m.id) && !names.isUnlocked(m.id))
+        .map((m) => names.unlock(m.id, names.savedKey(m.id), false).catch(() => {})));
+      render(machines);
+    } catch (e) {
+      ctx.toast(e.message);
+    }
+  };
 
   list.addEventListener('click', (e) => {
     const id = e.target.closest('[data-open]')?.dataset.open;
@@ -739,6 +751,13 @@ export async function showPrivacy(dialog, ctx) {
               ? '<button type="button" class="btn primary" data-privacy="discreet">Revenir au mode discret</button>'
               : '<button type="button" class="btn" data-privacy="1">Tout partager pendant 1 h</button><button type="button" class="btn" data-privacy="24">pendant 24 h</button>'}
           </div>
+          <h3 style="font-size:14px;margin:18px 0 8px">Clé de lecture des noms</h3>
+          <p class="secondary">Les vrais noms de tes applications partent aussi vers le serveur, mais <b>chiffrés</b> : il ne peut pas les lire. Avec cette clé, une personne de confiance peut les voir dans son navigateur. Ne la donne que si tu le souhaites ; la renouveler lui retire l'accès.</p>
+          <div class="toolbar">
+            <code class="code" style="word-break:break-all">${f.esc(state.readKey)}</code>
+            <button type="button" class="btn small" data-key="copy">Copier</button>
+            <button type="button" class="btn small" data-key="rotate">Renouveler la clé</button>
+          </div>
           <h3 style="font-size:14px;margin:18px 0 8px">Retrouver une application à partir de son pseudonyme</h3>
           <input class="search" data-filter type="search" placeholder="Pseudonyme ou nom (ex. 7F3A, steam)" value="${f.esc(filter)}" style="width:100%">
           <div class="table-wrap" style="margin-top:8px"><table class="data"><thead><tr><th>Application</th><th>Côté serveur</th></tr></thead><tbody>
@@ -767,6 +786,25 @@ export async function showPrivacy(dialog, ctx) {
         ctx.toast(e.message);
       }
     }));
+    dialog.querySelector('[data-key="copy"]').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(state.readKey);
+        ctx.toast('Clé copiée. Ne la transmets qu’à une personne de confiance.');
+      } catch {
+        ctx.toast('Copie impossible : sélectionne la clé à la main.');
+      }
+    });
+    dialog.querySelector('[data-key="rotate"]').addEventListener('click', async () => {
+      if (!confirm('Renouveler la clé ? Les personnes qui ont l’ancienne ne verront plus les vrais noms de tes applications.')) return;
+      try {
+        await api.rotateReadKey();
+        state = await api.privacy();
+        render(filter);
+        ctx.toast('Nouvelle clé générée : les noms sont rechiffrés au prochain envoi.');
+      } catch (e) {
+        ctx.toast(e.message);
+      }
+    });
   };
 
   render();

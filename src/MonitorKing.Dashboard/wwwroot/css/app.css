@@ -361,6 +361,10 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .report-tools { display: inline-flex; align-items: center; gap: 6px; }
 
+.pill-button { cursor: pointer; }
+.pill-button:hover { background: var(--surface-3); color: var(--text); }
+.pill-button.unlocked { color: var(--good-text); }
+
 /* Serveur : sélecteur de PC, codes d'inscription */
 .machine-select {
   font-weight: 600; font-size: 13px; padding: 3px 6px; border-radius: 6px; max-width: 260px;

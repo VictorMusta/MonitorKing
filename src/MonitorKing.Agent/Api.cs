@@ -96,6 +96,7 @@ public static class Api
         {
             privacy.Mode,
             privacy.FullUntil,
+            privacy.ReadKey,
             Server = UploadService.ServerUrl(options, db) is not { } url ? null : new
             {
                 Url = url,
@@ -116,6 +117,13 @@ public static class Api
         {
             privacy.BackToDiscreet();
             return Results.Ok(new { privacy.Mode });
+        });
+
+        // Nouvelle clé de lecture : quiconque avait l'ancienne ne peut plus lire les noms.
+        api.MapPost("/privacy/rotate-key", (Privacy privacy) =>
+        {
+            privacy.RotateReadKey();
+            return Results.Ok(new { privacy.ReadKey });
         });
 
         // Correspondance pseudonyme → application, pour que l'utilisateur retrouve ce dont Victor lui parle.

@@ -5,6 +5,7 @@ import { store } from './store.js';
 import { LineChart, sparkline } from './chart.js';
 import * as f from './format.js';
 import { icon, severityIcon, SEVERITY_LABEL } from './icons.js';
+import { reveal } from './names.js';
 
 export const KIND_LABELS = {
   crash: 'Plantage', hang: 'Gel', power: 'Alimentation', bsod: 'Écran bleu', memory: 'Mémoire',
@@ -77,7 +78,7 @@ export function renderDiagnosis(d, { limit = 99, scope = '' } = {}) {
     <div class="verdict">
       <span class="sev-icon">${severityIcon(d.severity, 22)}</span>
       <div>
-        <h3>${f.esc(d.verdict)}</h3>
+        <h3>${f.esc(reveal(d.verdict))}</h3>
         <p>${scope || (d.live ? `Analyse des ${Math.round((d.to - d.from) / 60000)} dernières minutes · ${f.time(d.to)}` : `${f.dateTime(d.from)} → ${f.time(d.to)}`)}</p>
       </div>
     </div>
@@ -87,8 +88,8 @@ export function renderDiagnosis(d, { limit = 99, scope = '' } = {}) {
           ${severityIcon(x.severity, 18)}
           <div>
             <span class="sev-label sev-${x.severity}">${SEVERITY_LABEL[x.severity]}</span>
-            <b>${f.esc(x.title)}</b>
-            <span>${f.esc(x.detail)}</span>
+            <b>${f.esc(reveal(x.title))}</b>
+            <span>${f.esc(reveal(x.detail))}</span>
           </div>
         </li>`).join('')}
     </ul>
@@ -101,7 +102,7 @@ export function eventRow(e, { details = false } = {}) {
     <div class="event">
       <span class="kind-dot ${tone}">${icon(KIND_ICONS[e.kind] ?? 'info', 14)}</span>
       <div>
-        <b>${f.esc(e.title)}</b>
+        <b>${f.esc(reveal(e.title))}</b>
         <div class="muted">${f.esc(KIND_LABELS[e.kind] ?? e.kind)} · ${f.esc(e.provider)} · événement ${e.eventId}</div>
         ${details && e.message ? `<details><summary>Message de Windows</summary><pre>${f.esc(e.message)}</pre></details>` : ''}
       </div>
@@ -110,8 +111,8 @@ export function eventRow(e, { details = false } = {}) {
 }
 
 export function processCell(p) {
-  const sub = [p.name !== f.appName(p) ? p.name : null, p.via ? `via ${p.via}` : null, p.count > 1 ? `${p.count} processus` : null].filter(Boolean).join(' · ');
-  return `<div class="app-name"><b title="${f.esc(p.name)}">${f.esc(f.appName(p))}</b>${sub ? `<small>${f.esc(sub)}</small>` : ''}</div>`;
+  const exe = f.exeName(p); p.via ? `via ${p.via}` : null, p.count > 1 ? `${p.count} processus` : null].filter(Boolean).join(' · ');
+  return `<div class="app-name"><b title="${f.esc(exe)}">${f.esc(f.appName(p))}</b>${sub ? `<small>${f.esc(sub)}</small>` : ''}</div>`;
 }
 
 export const catalog = {
@@ -219,7 +220,7 @@ export const catalog = {
           const max = Math.max(r.max(snap.processes), r.value(list[0]));
           body.innerHTML = `<ol class="toplist">${list.map((x) => `
             <li>
-              <span class="name" title="${f.esc(x.name)}">${f.esc(f.appName(x))}${x.count > 1 ? ` <span class="muted">×${x.count}</span>` : ''}</span>
+              <span class="name" title="${f.esc(f.exeName(x))}">${f.esc(f.appName(x))}${x.count > 1 ? ` <span class="muted">×${x.count}</span>` : ''}</span>
               <span class="val">${r.format(r.value(x))}</span>
               <div class="bar"><div style="width:${(clamp01(r.value(x) / max) * 100).toFixed(1)}%"></div></div>
             </li>`).join('')}</ol>`;
@@ -248,12 +249,12 @@ export const catalog = {
         update(snap) {
           let html = snap.hung.length
             ? `<ol class="toplist">${snap.hung.map((h) => `
-                <li><span class="name sev-critical">${f.esc(h.process)}</span><span class="val">${f.duration((snap.ts - h.since) / 1000)}</span>
+                <li><span class="name sev-critical">${f.esc(reveal(h.process))}</span><span class="val">${f.duration((snap.ts - h.since) / 1000)}</span>
                 <div class="muted" style="grid-column:1/-1">${f.esc(h.title)}</div></li>`).join('')}</ol>`
             : `<div class="secondary"><span class="sev-ok">${icon('ok', 16, 'style="vertical-align:-3px"')}</span> Aucune fenêtre gelée en ce moment.</div>`;
           const past = recent.filter((h) => h.end);
           html += `<div class="muted" style="margin-top:10px">${past.length
-            ? `${past.length} gel${past.length > 1 ? 's' : ''} en 24 h. Dernier : ${f.esc(past[0].process)} (${f.duration((past[0].end - past[0].start) / 1000)}).`
+            ? `${past.length} gel${past.length > 1 ? 's' : ''} en 24 h. Dernier : ${f.esc(reveal(past[0].process))} (${f.duration((past[0].end - past[0].start) / 1000)}).`
             : 'Aucun gel enregistré depuis 24 h.'}</div>`;
           body.innerHTML = html;
         },

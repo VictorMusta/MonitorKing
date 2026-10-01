@@ -39,6 +39,7 @@ export const api = {
   privacy: () => get('/privacy', '/api'),
   shareFull: (hours) => send('POST', `/privacy/full${query({ hours })}`),
   backToDiscreet: () => send('POST', '/privacy/discreet'),
+  rotateReadKey: () => send('POST', '/privacy/rotate-key'),
   pseudonyms: () => get('/pseudonyms', '/api'),
   // Machine courante
   info: () => get('/info'),

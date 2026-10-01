@@ -14,6 +14,12 @@ public sealed record SampleDto(string Key, long Ts, double Avg, double Max);
 public sealed record ProcessDto(long Ts, ProcRow Row);
 
 /// <summary>
+/// Vrai nom d'une application pseudonymisée, chiffré (AES-256-GCM) avec la clé de lecture du PC.
+/// Le serveur le stocke sans pouvoir le lire ; seul un navigateur qui a la clé peut le déchiffrer.
+/// </summary>
+public sealed record SealedName(string Pseudonym, string Sealed);
+
+/// <summary>
 /// Lot de données envoyé par l'agent. En mode « discret » (par défaut), les applications non Windows
 /// sont pseudonymisées et les titres de fenêtres comme les messages des événements sont retirés.
 /// </summary>
@@ -25,4 +31,5 @@ public sealed record UploadBatch(
     List<SampleDto> Samples,
     List<ProcessDto> Processes,
     List<EventItem> Events,
-    List<HangItem> Hangs);
+    List<HangItem> Hangs,
+    List<SealedName>? SealedNames = null);
