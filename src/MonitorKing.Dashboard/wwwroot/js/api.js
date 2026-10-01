@@ -48,6 +48,7 @@ export const api = {
   live: () => get('/live'),
   series: (keys, params) => get(`/series${query({ keys: keys.join(','), ...params })}`),
   processes: (from, to) => get(`/processes${query({ from, to })}`),
+  breakdown: (resource, params) => get(`/breakdown${query({ resource, ...params })}`),
   events: (params) => get(`/events${query(params)}`),
   diagnosis: (params) => get(`/diagnosis${query(params)}`),
   reportUrl: (params) => `${base}/report${query(params)}`,

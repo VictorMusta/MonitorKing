@@ -59,6 +59,16 @@ public static class Api
         api.MapGet("/processes", (long from, long to, Database db) =>
             db.TopProcesses(from, to).OrderByDescending(p => p.Cpu).ToList());
 
+        // Part de chaque application dans une ressource, au fil du temps (graphique en aires empilées).
+        api.MapGet("/breakdown", (string resource, int? minutes, long? from, long? to, int? points, Database db) =>
+        {
+            if (!Breakdown.IsKnown(resource)) return Results.BadRequest("Ressource inconnue");
+            var end = to ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var begin = from ?? end - Math.Clamp(minutes ?? 60, 5, 14 * 24 * 60) * 60_000L;
+            if (end <= begin) return Results.BadRequest("Période vide");
+            return Results.Ok(Breakdown.Build(db, resource, begin, end, Math.Clamp(points ?? 240, 20, 600)));
+        });
+
         api.MapGet("/events", (long? from, long? to, int? limit, Database db) =>
         {
             var end = to ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

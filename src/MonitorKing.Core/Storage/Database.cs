@@ -220,11 +220,17 @@ public sealed class Database
         }
     }
 
+    /// <summary>Largeur des tranches pour ramener une période à au plus <paramref name="maxPoints"/> points (multiple de 10 s).</summary>
+    public static long BucketStep(long from, long to, int maxPoints)
+    {
+        var step = Math.Max(10_000, (to - from) / Math.Max(1, maxPoints));
+        return (long)Math.Ceiling(step / 10_000d) * 10_000;
+    }
+
     /// <summary>Série d'une métrique, regroupée en au plus <paramref name="maxPoints"/> points.</summary>
     public List<double[]> Series(string key, long from, long to, int maxPoints)
     {
-        var step = Math.Max(10_000, (to - from) / Math.Max(1, maxPoints));
-        step = (long)Math.Ceiling(step / 10_000d) * 10_000;
+        var step = BucketStep(from, to, maxPoints);
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -242,6 +248,82 @@ public sealed class Database
         while (reader.Read())
             points.Add(new[] { reader.GetInt64(0) + step / 2d, reader.GetDouble(1), reader.GetDouble(2) });
         return points;
+    }
+
+    /// <summary>Moyenne d'une métrique par tranche de <paramref name="step"/> ms (clé : début de la tranche).</summary>
+    public Dictionary<long, double> BucketAverages(string key, long from, long to, long step)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT (s.ts / $step) * $step AS bucket, AVG(s.avg)
+            FROM sample s JOIN metric m ON m.id = s.metric_id
+            WHERE m.key = $key AND s.ts >= $from AND s.ts <= $to
+            GROUP BY bucket
+            """;
+        command.Parameters.AddWithValue("$step", step);
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$from", from);
+        command.Parameters.AddWithValue("$to", to);
+        var averages = new Dictionary<long, double>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) averages[reader.GetInt64(0)] = reader.GetDouble(1);
+        return averages;
+    }
+
+    /// <summary>
+    /// Consommation de chaque application par tranche de <paramref name="step"/> ms : somme sur les fenêtres de 10 s
+    /// de la tranche, et nombre de fenêtres enregistrées par tranche (pour en faire une moyenne).
+    /// </summary>
+    public (Dictionary<long, int> Windows, List<(long Bucket, string Name, string? Description, string? Via, double Sum)> Rows) ProcessBuckets(
+        string resource, long from, long to, long step)
+    {
+        // Liste fermée : la colonne est insérée telle quelle dans la requête.
+        var column = resource switch
+        {
+            "cpu" => "cpu",
+            "ram" => "ram_mb",
+            "gpu" => "gpu",
+            "vram" => "vram_mb",
+            "io" => "io_read + io_write",
+            _ => throw new ArgumentException($"Ressource inconnue : {resource}", nameof(resource)),
+        };
+
+        using var connection = Open();
+        var windows = new Dictionary<long, int>();
+        using (var count = connection.CreateCommand())
+        {
+            count.CommandText = """
+                SELECT (ts / $step) * $step AS bucket, COUNT(DISTINCT ts) FROM proc_sample
+                WHERE ts >= $from AND ts <= $to GROUP BY bucket
+                """;
+            count.Parameters.AddWithValue("$step", step);
+            count.Parameters.AddWithValue("$from", from);
+            count.Parameters.AddWithValue("$to", to);
+            using var reader = count.ExecuteReader();
+            while (reader.Read()) windows[reader.GetInt64(0)] = reader.GetInt32(1);
+        }
+
+        var rows = new List<(long, string, string?, string?, double)>();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"""
+                SELECT (ts / $step) * $step AS bucket, name, MAX(description), MAX(via), SUM({column})
+                FROM proc_sample WHERE ts >= $from AND ts <= $to
+                GROUP BY bucket, name
+                """;
+            command.Parameters.AddWithValue("$step", step);
+            command.Parameters.AddWithValue("$from", from);
+            command.Parameters.AddWithValue("$to", to);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add((reader.GetInt64(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetDouble(4)));
+            }
+        }
+
+        return (windows, rows);
     }
 
     /// <summary>Fenêtres de 10 s brutes d'une métrique (moyenne et pic de chaque fenêtre).</summary>

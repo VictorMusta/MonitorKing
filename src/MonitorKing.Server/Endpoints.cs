@@ -188,6 +188,16 @@ public static class Endpoints
         machine.MapGet("/processes", (string id, long from, long to, ServerStore store) =>
             store.Machine(id) is null ? Results.NotFound() : Results.Ok(store.DatabaseFor(id).TopProcesses(from, to).OrderByDescending(p => p.Cpu).ToList()));
 
+        machine.MapGet("/breakdown", (string id, string resource, int? minutes, long? from, long? to, int? points, ServerStore store) =>
+        {
+            if (store.Machine(id) is null) return Results.NotFound();
+            if (!Breakdown.IsKnown(resource)) return Results.BadRequest("Ressource inconnue");
+            var end = to ?? Now;
+            var begin = from ?? end - Math.Clamp(minutes ?? 60, 5, 31 * 24 * 60) * 60_000L;
+            if (end <= begin) return Results.BadRequest("Période vide");
+            return Results.Ok(Breakdown.Build(store.DatabaseFor(id), resource, begin, end, Math.Clamp(points ?? 240, 20, 600)));
+        });
+
         machine.MapGet("/events", (string id, long? from, long? to, int? limit, ServerStore store) =>
         {
             if (store.Machine(id) is null) return Results.NotFound();

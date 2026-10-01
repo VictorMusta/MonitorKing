@@ -28,7 +28,7 @@ Copier `deploy/agent/demarrage-windows.cmd` et `demarrage-windows.ps1` dans `out
 | **Mes PC** (serveur) | Les PC inscrits : en ligne ou non, verdict du moment, bouton « Ajouter un PC » qui génère un code d'inscription. |
 | **Accueil** | Écran personnalisable : *Personnaliser* → ajouter, déplacer, redimensionner ou retirer des widgets. |
 | **Pourquoi ça rame ?** | Verdict : quelle ressource sature, quelle application en est responsable, ce que Windows a signalé à côté. Rapport Markdown à copier pour Claude. |
-| **Applications** | Consommation par application (processeur, RAM, E/S, GPU, VRAM), triable. `svchost` séparés par service, processus WebView2 rattachés à leur application. |
+| **Applications** | Répartition au fil du temps : part de chaque application dans le processeur, la RAM, le GPU, la VRAM ou les E/S (aires empilées, en % ou en valeurs, de 30 min à 7 jours). Puis la consommation en direct, triable. `svchost` séparés par service, processus WebView2 rattachés à leur application. |
 | **Processeur & mémoire** | Charge par cœur, pilotes (DPC), mémoire engagée, pagination, activité et temps de réponse de chaque disque. |
 | **Carte graphique**, **Capteurs**, **Réseau** | GPU par moteur, VRAM, températures, ventilateurs, Wi-Fi, débit. |
 | **Journal** | Plantages, gels, arrêts brutaux, écrans bleus, erreurs disque, WHEA, bridage CPU… importés dès le premier lancement (30 jours). |

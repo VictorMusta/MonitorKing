@@ -2,7 +2,7 @@
 // ajouter une métrique côté agent la rend aussitôt disponible ici (via /api/metrics).
 import { api } from './api.js';
 import { store } from './store.js';
-import { LineChart, sparkline } from './chart.js';
+import { LineChart, StackedChart, sparkline } from './chart.js';
 import * as f from './format.js';
 import { icon, severityIcon, SEVERITY_LABEL } from './icons.js';
 import { reveal } from './names.js';
@@ -31,6 +31,16 @@ export const RESOURCES = {
   gpu: { label: 'Carte graphique', value: (p) => p.gpu, format: (v) => f.pct(v), max: () => 100 },
   vram: { label: 'Mémoire vidéo', value: (p) => p.vramMb, format: (v) => f.mb(v), max: (list) => vramTotalMb() ?? Math.max(1, ...list.map((p) => p.vramMb)) },
 };
+
+// Répartition dans le temps (aires empilées) : « reste » = total mesuré par le PC moins les applications listées.
+const BREAKDOWN = {
+  cpu: { label: 'Processeur', suffix: 'du processeur', rest: 'Windows et reste', note: '« Windows et reste » : la charge totale du processeur moins celle des applications (noyau, pilotes, petites applications).' },
+  ram: { label: 'Mémoire vive', rest: 'Windows, cache et reste', note: '« Windows, cache et reste » : la mémoire utilisée au total moins celle des applications (noyau, pilotes, cache, petites applications).' },
+  gpu: { label: 'Carte graphique', suffix: 'du GPU', note: 'Travail de la carte graphique demandé par chaque application, tous moteurs confondus (3D, vidéo, calcul).' },
+  vram: { label: 'Mémoire vidéo', rest: 'Windows et reste', note: '« Windows et reste » : la mémoire vidéo utilisée au total moins celle des applications.' },
+  io: { label: 'Disque et réseau', note: 'Lectures et écritures de chaque application, disque et réseau confondus : Windows ne sépare pas le réseau application par application.' },
+};
+const PERIODS = [[30, '30 min'], [60, '1 h'], [360, '6 h'], [1440, '24 h'], [10080, '7 j']];
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
@@ -368,6 +378,96 @@ export const catalog = {
             </dl>`;
         },
       };
+    },
+  },
+
+  breakdown: {
+    name: 'Répartition dans le temps',
+    description: 'La part de chaque application dans une ressource, au fil du temps (aires empilées).',
+    defaultSize: 'l',
+    title: () => 'Qui consomme quoi, au fil du temps',
+    create(body, p) {
+      let resource = p.resource ?? 'cpu';
+      let minutes = p.minutes ?? 60;
+      let percent = p.percent ?? true;
+      let last = null;
+      let chart = null;
+      let timer = null;
+      let alive = true;
+      const group = (name, options) =>
+        `<div class="segmented" data-group="${name}">${options.map(([value, label]) => `<button type="button" data-value="${value}">${label}</button>`).join('')}</div>`;
+      body.innerHTML = `
+        <div class="toolbar">
+          ${group('resource', Object.entries(BREAKDOWN).map(([id, r]) => [id, r.label]))}
+          ${group('minutes', PERIODS)}
+          ${group('mode', [['percent', 'En %'], ['value', 'Valeurs']])}
+        </div>
+        <div data-chart><div class="empty">Chargement…</div></div>
+        <p class="muted" data-note style="margin:8px 0 0;font-size:12px"></p>`;
+      const holder = body.querySelector('[data-chart]');
+      const note = body.querySelector('[data-note]');
+
+      const press = () => {
+        const current = { resource, minutes: String(minutes), mode: percent ? 'percent' : 'value' };
+        body.querySelectorAll('[data-group]').forEach((g) =>
+          g.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === current[g.dataset.group]))));
+      };
+
+      const render = () => {
+        chart?.destroy();
+        chart = null;
+        const d = last;
+        const series = d.apps.map((a, i) => ({ key: `a${i}`, label: f.appName(a) }));
+        const data = {};
+        d.apps.forEach((a, i) => (data[`a${i}`] = d.ts.map((t, k) => [t, a.values[k]])));
+        if (d.others.some((v) => v > 0)) {
+          series.push({ key: 'others', label: 'Autres applications', color: '--s-other' });
+          data.others = d.ts.map((t, k) => [t, d.others[k]]);
+        }
+        if (d.rest?.some((v) => v > 0)) {
+          series.push({ key: 'rest', label: BREAKDOWN[resource].rest, color: '--s-rest' });
+          data.rest = d.ts.map((t, k) => [t, d.rest[k]]);
+        }
+        note.textContent = BREAKDOWN[resource].note;
+        if (series.length === 0 || d.ts.length === 0) {
+          holder.innerHTML = '<div class="empty">Pas encore de données sur cette période.</div>';
+          return;
+        }
+        chart = new StackedChart(holder, { series, unit: d.unit, percent, valueSuffix: BREAKDOWN[resource].suffix, height: p.height ?? 260 });
+        chart.setData(data, d.from, d.to);
+      };
+
+      const load = async () => {
+        clearTimeout(timer);
+        press();
+        try {
+          const d = await api.breakdown(resource, { minutes, points: 240 });
+          if (!alive) return;
+          last = d;
+          render();
+        } catch (e) {
+          if (alive) holder.innerHTML = `<div class="empty">Répartition indisponible : ${f.esc(e.message)}</div>`;
+        }
+        if (alive) timer = setTimeout(load, minutes <= 360 ? 30_000 : 300_000);
+      };
+
+      body.querySelector('.toolbar').addEventListener('click', (e) => {
+        const button = e.target.closest('button[data-value]');
+        if (!button) return;
+        const name = button.closest('[data-group]').dataset.group;
+        if (name === 'mode') {
+          percent = button.dataset.value === 'percent';
+          press();
+          if (last) render();
+          return;
+        }
+        if (name === 'resource') resource = button.dataset.value;
+        else minutes = Number(button.dataset.value);
+        load();
+      });
+
+      load();
+      return { destroy: () => { alive = false; clearTimeout(timer); chart?.destroy(); } };
     },
   },
 

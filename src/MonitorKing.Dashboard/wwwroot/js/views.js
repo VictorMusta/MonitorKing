@@ -265,8 +265,8 @@ export function diagnostic(root, ctx) {
 // ---------------------------------------------------------------- Applications
 
 export function applications(root, ctx) {
-  head(root, 'Applications', 'Qui utilise le processeur, la mémoire, le disque et la carte graphique, en direct. Clique sur une colonne pour trier.');
-  return grid(root, [{ type: 'processes', size: 'l' }], ctx);
+  head(root, 'Applications', 'Qui utilise le processeur, la mémoire, le disque et la carte graphique : la répartition au fil du temps, puis le détail en direct (clique sur une colonne pour trier).');
+  return grid(root, [{ type: 'breakdown', size: 'l' }, { type: 'processes', size: 'l' }], ctx);
 }
 
 // ---------------------------------------------------------------- Système

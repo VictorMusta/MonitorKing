@@ -31,6 +31,43 @@ function gapThreshold(points) {
   return Math.max(diffs[Math.floor(diffs.length / 2)] * 3, 5000);
 }
 
+/** Couleur d'une série : la sienne si elle en déclare une (ex. « autres » en gris), sinon la palette. */
+const seriesColor = (s, i) => s.color ?? SERIES_VARS[i % SERIES_VARS.length];
+
+/** Grille (0, moitié, max) avec ses valeurs, puis l'axe du temps. */
+function drawAxes(ctx, { h, pad, pw, ph }, from, to, yMax, unit) {
+  const x = (ts) => pad.l + ((ts - from) / (to - from)) * pw;
+  const y = (v) => pad.t + ph - (Math.min(v, yMax) / yMax) * ph;
+  const grid = cssVar('--grid');
+  const axis = cssVar('--axis');
+  const muted = cssVar('--muted');
+
+  ctx.font = `11px ${cssVar('--font') || 'system-ui'}`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'right';
+  for (const t of [0, 0.5, 1]) {
+    const yy = Math.round(y(yMax * t)) + 0.5;
+    ctx.strokeStyle = t === 0 ? axis : grid;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, yy);
+    ctx.lineTo(pad.l + pw, yy);
+    ctx.stroke();
+    ctx.fillStyle = muted;
+    ctx.fillText(fmtValue(yMax * t, unit), pad.l - 8, yy);
+  }
+
+  const span = to - from;
+  const ticks = Math.max(2, Math.min(6, Math.floor(pw / 110)));
+  ctx.textBaseline = 'alphabetic';
+  for (let i = 0; i <= ticks; i++) {
+    const ts = from + (span * i) / ticks;
+    ctx.textAlign = i === 0 ? 'left' : i === ticks ? 'right' : 'center';
+    ctx.fillStyle = muted;
+    ctx.fillText(xLabel(ts, span), x(ts), h - 6);
+  }
+}
+
 export class LineChart {
   /**
    * @param {HTMLElement} el
@@ -52,9 +89,9 @@ export class LineChart {
     el.innerHTML = '';
     if (this.series.length > 1) {
       const legend = document.createElement('div');
-      legend.className = 'chart-legend';
+      legend.className = this.options.swatch === 'area' ? 'chart-legend area' : 'chart-legend';
       legend.innerHTML = this.series
-        .map((s, i) => `<span><i style="background:var(${SERIES_VARS[i]})"></i>${esc(s.label)}</span>`)
+        .map((s, i) => `<span><i style="background:var(${seriesColor(s, i)})"></i>${esc(s.label)}</span>`)
         .join('');
       el.appendChild(legend);
     }
@@ -113,7 +150,7 @@ export class LineChart {
   layout() {
     const w = this.plot.clientWidth;
     const h = this.plot.clientHeight;
-    const pad = { l: 58, r: 10, t: 8, b: 22 };
+    const pad = { l: 58, r: this.options.padRight ?? 10, t: 8, b: 22 };
     return { w, h, pad, pw: Math.max(10, w - pad.l - pad.r), ph: Math.max(10, h - pad.t - pad.b) };
   }
 
@@ -159,23 +196,29 @@ export class LineChart {
     return (this.data[key] || []).filter((p) => p[0] >= this.from && p[0] <= this.to && p[1] != null && !Number.isNaN(p[1]));
   }
 
-  draw() {
-    const { w, h, pad, pw, ph } = this.layout();
-    if (!w || !h) return;
+  /** Dimensionne le canvas et renvoie le contexte prêt à dessiner, ou null si le graphique est masqué. */
+  prepare() {
+    const geom = this.layout();
+    if (!geom.w || !geom.h) return null;
     const dpr = window.devicePixelRatio || 1;
-    if (this.canvas.width !== Math.round(w * dpr) || this.canvas.height !== Math.round(h * dpr)) {
-      this.canvas.width = Math.round(w * dpr);
-      this.canvas.height = Math.round(h * dpr);
+    if (this.canvas.width !== Math.round(geom.w * dpr) || this.canvas.height !== Math.round(geom.h * dpr)) {
+      this.canvas.width = Math.round(geom.w * dpr);
+      this.canvas.height = Math.round(geom.h * dpr);
     }
 
     const ctx = this.canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+    ctx.clearRect(0, 0, geom.w, geom.h);
+    return { ctx, ...geom };
+  }
 
-    const colors = this.series.map((_, i) => cssVar(SERIES_VARS[i]));
-    const grid = cssVar('--grid');
+  draw() {
+    const geom = this.prepare();
+    if (!geom) return;
+    const { ctx, w, pad, pw, ph } = geom;
+
+    const colors = this.series.map((s, i) => cssVar(seriesColor(s, i)));
     const axis = cssVar('--axis');
-    const muted = cssVar('--muted');
     const surface = cssVar('--surface');
     const accent = cssVar('--accent');
     const unit = this.options.unit;
@@ -187,33 +230,8 @@ export class LineChart {
 
     const x = (ts) => pad.l + ((ts - this.from) / (this.to - this.from)) * pw;
     const y = (v) => pad.t + ph - (Math.min(v, yMax) / yMax) * ph;
-
-    // Grille : trois repères (0, moitié, max), traits fins et discrets.
-    ctx.font = `11px ${cssVar('--font') || 'system-ui'}`;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'right';
-    for (const t of [0, 0.5, 1]) {
-      const yy = Math.round(y(yMax * t)) + 0.5;
-      ctx.strokeStyle = t === 0 ? axis : grid;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(pad.l, yy);
-      ctx.lineTo(pad.l + pw, yy);
-      ctx.stroke();
-      ctx.fillStyle = muted;
-      ctx.fillText(fmtValue(yMax * t, unit), pad.l - 8, yy);
-    }
-
-    // Axe du temps.
+    drawAxes(ctx, geom, this.from, this.to, yMax, unit);
     const span = this.to - this.from;
-    const ticks = Math.max(2, Math.min(6, Math.floor(pw / 110)));
-    ctx.textBaseline = 'alphabetic';
-    for (let i = 0; i <= ticks; i++) {
-      const ts = this.from + (span * i) / ticks;
-      ctx.textAlign = i === 0 ? 'left' : i === ticks ? 'right' : 'center';
-      ctx.fillStyle = muted;
-      ctx.fillText(xLabel(ts, span), x(ts), h - 6);
-    }
 
     // Marqueurs d'événements (plantages, gels…) en haut du graphique.
     for (const m of this.markers) {
@@ -353,6 +371,161 @@ export class LineChart {
     ctx.arc(cx, cy, 4, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+/**
+ * Aires empilées : chaque série est une couche posée sur les précédentes (toutes partagent les mêmes instants).
+ * En mode « percent », chaque instant est ramené à 100 % : on lit la part de chacun. La part (ou la valeur)
+ * du dernier instant est écrite à droite de chaque couche.
+ */
+export class StackedChart extends LineChart {
+  constructor(el, options) {
+    super(el, { area: false, showLastDot: false, padRight: 64, swatch: 'area', percent: false, ...options });
+  }
+
+  /** Bas et haut de chaque couche, instant par instant (en % du total en mode « percent »). */
+  bands() {
+    const ts = (this.data[this.series[0]?.key] || []).map((p) => p[0]);
+    const layers = this.series.map((s) => {
+      const points = this.data[s.key] || [];
+      return ts.map((_, k) => Math.max(0, points[k]?.[1] ?? 0));
+    });
+    const totals = ts.map((_, k) => layers.reduce((sum, layer) => sum + layer[k], 0));
+    const level = ts.map(() => 0);
+    const bottoms = [];
+    const tops = [];
+    for (const layer of layers) {
+      bottoms.push(level.slice());
+      for (let k = 0; k < ts.length; k++) {
+        level[k] += this.options.percent ? (totals[k] > 0 ? (layer[k] / totals[k]) * 100 : 0) : layer[k];
+      }
+      tops.push(level.slice());
+    }
+    return { ts, layers, totals, bottoms, tops };
+  }
+
+  draw() {
+    const geom = this.prepare();
+    if (!geom) return;
+    const { ctx, w, pad, pw, ph } = geom;
+    const { ts, layers, totals, bottoms, tops } = this.bands();
+    const colors = this.series.map((s, i) => cssVar(seriesColor(s, i)));
+    const percent = this.options.percent;
+    const unit = this.options.unit;
+    const peak = Math.max(0, ...(tops[tops.length - 1] ?? [0]));
+    const yMax = percent ? 100 : niceMax(Math.max(peak * 1.05, MIN_SCALE[unit] ?? 1));
+    const x = (t) => pad.l + ((t - this.from) / (this.to - this.from)) * pw;
+    const y = (v) => pad.t + ph - (Math.min(v, yMax) / yMax) * ph;
+    drawAxes(ctx, geom, this.from, this.to, yMax, percent ? '%' : unit);
+    if (ts.length === 0) {
+      this.tip.hidden = true;
+      return;
+    }
+
+    // Tronçons continus : pas d'aire tirée à travers un trou (agent arrêté).
+    const gap = gapThreshold(ts.map((t) => [t]));
+    const segments = [];
+    let start = 0;
+    for (let k = 1; k <= ts.length; k++) {
+      if (k === ts.length || ts[k] - ts[k - 1] > gap) {
+        segments.push([start, k]);
+        start = k;
+      }
+    }
+
+    layers.forEach((_, i) => {
+      ctx.fillStyle = colors[i];
+      for (const [a, b] of segments) {
+        if (b - a === 1) {
+          ctx.fillRect(x(ts[a]) - 1, y(tops[i][a]), 2, y(bottoms[i][a]) - y(tops[i][a]));
+          continue;
+        }
+        ctx.beginPath();
+        ctx.moveTo(x(ts[a]), y(tops[i][a]));
+        for (let k = a + 1; k < b; k++) ctx.lineTo(x(ts[k]), y(tops[i][k]));
+        for (let k = b - 1; k >= a; k--) ctx.lineTo(x(ts[k]), y(bottoms[i][k]));
+        ctx.closePath();
+        ctx.fill();
+      }
+    });
+
+    // Fin liseré entre les couches, pour les distinguer même quand deux couleurs se ressemblent.
+    ctx.strokeStyle = cssVar('--surface');
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.7;
+    for (let i = 0; i < layers.length - 1; i++) {
+      for (const [a, b] of segments) {
+        if (b - a < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(x(ts[a]), y(tops[i][a]));
+        for (let k = a + 1; k < b; k++) ctx.lineTo(x(ts[k]), y(tops[i][k]));
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // À droite : la part (ou la valeur) de chaque couche au dernier instant, sans chevauchement.
+    const last = ts.length - 1;
+    const share = (k, v) => (totals[k] > 0 ? (v / totals[k]) * 100 : 0);
+    const labels = layers
+      .map((layer, i) => ({ i, mid: (y(tops[i][last]) + y(bottoms[i][last])) / 2, value: layer[last], share: share(last, layer[last]) }))
+      .filter((l) => l.share >= 0.5)
+      .sort((a, b) => a.mid - b.mid);
+    ctx.font = `600 11px ${cssVar('--font') || 'system-ui'}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const muted = cssVar('--muted');
+    let previous = -Infinity;
+    for (const l of labels) {
+      const ly = Math.min(pad.t + ph, Math.max(previous + 12, l.mid));
+      previous = ly;
+      ctx.fillStyle = this.series[l.i].color ? muted : colors[l.i]; // couches grises (autres, reste) : texte lisible
+      ctx.fillText(percent ? fmtValue(l.share, '%') : fmtValue(l.value, unit), pad.l + pw + 6, ly);
+    }
+
+    // Réticule + infobulle : de la couche du haut à celle du bas, avec la valeur et la part de chacune.
+    if (this.hover == null || this.hover < pad.l || this.hover > pad.l + pw) {
+      this.tip.hidden = true;
+      return;
+    }
+    const k = nearestIndex(ts, this.tsAt(this.hover));
+    const cx = Math.round(x(ts[k])) + 0.5;
+    ctx.strokeStyle = cssVar('--axis');
+    ctx.beginPath();
+    ctx.moveTo(cx, pad.t);
+    ctx.lineTo(cx, pad.t + ph);
+    ctx.stroke();
+    const span = this.to - this.from;
+    // Une valeur en % du processeur ne doit pas se confondre avec la part dans le graphique : on la nomme.
+    const absolute = (v) => fmtValue(v, unit) + (this.options.valueSuffix ? ` ${this.options.valueSuffix}` : '');
+    const rows = layers.map((layer, i) => ({ i, v: layer[k] })).filter((r) => r.v > 0).reverse();
+    this.tip.innerHTML =
+      `<div class="t">${esc(span > 36 * 3600_000 ? dateTime(ts[k]) : fmtTime(ts[k]))}</div>` +
+      rows
+        .map((r) => {
+          const main = percent ? fmtValue(share(k, r.v), '%') : fmtValue(r.v, unit);
+          const second = percent ? absolute(r.v) : `${fmtValue(share(k, r.v), '%')} du total`;
+          return `<div class="r"><i style="background:${colors[r.i]}"></i>${esc(this.series[r.i].label)}<b>${esc(main)} <span class="muted">· ${esc(second)}</span></b></div>`;
+        })
+        .join('') +
+      `<div class="r" style="margin-top:4px"><i></i>Total<b>${esc(absolute(totals[k]))}</b></div>`;
+    this.tip.hidden = false;
+    const tipWidth = this.tip.offsetWidth;
+    const left = cx + 14 + tipWidth > w ? cx - 14 - tipWidth : cx + 14;
+    this.tip.style.left = `${Math.max(0, left)}px`;
+    this.tip.style.top = `${pad.t}px`;
+  }
+}
+
+function nearestIndex(values, target) {
+  let lo = 0;
+  let hi = values.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (values[mid] < target) lo = mid;
+    else hi = mid;
+  }
+  return Math.abs(values[lo] - target) <= Math.abs(values[hi] - target) ? lo : hi;
 }
 
 function nearest(points, ts) {
