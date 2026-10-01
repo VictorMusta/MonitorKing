@@ -96,9 +96,9 @@ public static class Api
         {
             privacy.Mode,
             privacy.FullUntil,
-            Server = string.IsNullOrWhiteSpace(options.Server.Url) ? null : new
+            Server = UploadService.ServerUrl(options, db) is not { } url ? null : new
             {
-                options.Server.Url,
+                Url = url,
                 Enrolled = db.Get(UploadService.TokenKey) is not null,
                 Label = db.Get(UploadService.LabelKey),
                 LastUpload = long.TryParse(db.Get(UploadService.LastUploadKey), out var last) ? last : (long?)null,

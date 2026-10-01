@@ -14,6 +14,7 @@ namespace MonitorKing.Agent;
 public sealed class UploadService : BackgroundService
 {
     public const string TokenKey = "server.token";
+    public const string ServerUrlKey = "server.url";
     public const string MachineIdKey = "server.machine_id";
     public const string LabelKey = "server.label";
     public const string LastUploadKey = "upload.last";
@@ -43,15 +44,18 @@ public sealed class UploadService : BackgroundService
         _logger = logger;
     }
 
+    /// <summary>Adresse du serveur : celle de la configuration, sinon celle mémorisée lors de l'inscription.</summary>
+    public static string? ServerUrl(AgentOptions options, Database db) =>
+        string.IsNullOrWhiteSpace(options.Server.Url) ? db.Get(ServerUrlKey) : options.Server.Url.TrimEnd('/');
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (string.IsNullOrWhiteSpace(_options.Server.Url))
+        if (ServerUrl(_options, _db) is not { } server)
         {
             _logger.LogInformation("Pas de serveur configuré : les données restent sur ce PC.");
             return;
         }
 
-        var server = _options.Server.Url.TrimEnd('/');
         var interval = TimeSpan.FromSeconds(Math.Max(5, _options.Server.UploadIntervalSeconds));
         await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken); // laisser l'agent enregistrer ses premières fenêtres
 
@@ -103,6 +107,7 @@ public sealed class UploadService : BackgroundService
         _db.Set(MachineIdKey, enrolled.MachineId);
         _db.Set(LabelKey, enrolled.Label);
         _db.Set(TokenKey, enrolled.Token);
+        _db.Set(ServerUrlKey, server); // les lancements suivants n'auront plus besoin de l'adresse
         // Premier envoi : les dernières 24 h, pas tout l'historique local.
         _db.Set(SamplesCursorKey, DateTimeOffset.UtcNow.AddHours(-24).ToUnixTimeMilliseconds().ToString());
         _logger.LogInformation("Machine inscrite sur {Server} sous le nom « {Label} »", server, enrolled.Label);
