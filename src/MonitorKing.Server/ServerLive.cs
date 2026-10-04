@@ -70,9 +70,14 @@ public static class ServerLive
         };
     }
 
+    /// <summary>
+    /// Gels encore en cours. L'absence de fin ne suffit pas : si l'agent s'arrête en plein gel (extinction du PC,
+    /// mise à jour), la fin n'arrive jamais. Tant qu'une fenêtre est gelée, le PC en compte au moins une à chaque
+    /// mesure ; dès qu'une mesure reçue depuis le début du gel n'en compte aucune, ce gel est terminé.
+    /// </summary>
     private static List<HungWindow> ActiveHangs(ServerMachine machine, long at) =>
         machine.Database.Hangs(at - 10 * 60_000, at)
-            .Where(h => h.End is null)
+            .Where(h => h.End is null && !machine.Database.PeakBelow("hang.count", h.Start, at, 0.5))
             .Select(h => new HungWindow(h.Pid, h.Process, h.Title, h.Start))
             .ToList();
 

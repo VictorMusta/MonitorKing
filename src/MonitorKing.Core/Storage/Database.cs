@@ -127,8 +127,6 @@ public sealed class Database
                 system INTEGER NOT NULL,
                 updated_ts INTEGER NOT NULL
             );
-            -- Un gel encore ouvert au démarrage date d'une session précédente : sa fin est inconnue.
-            UPDATE hang SET end_ts = -1 WHERE end_ts IS NULL;
             -- Les événements informatifs (ex. « volume sain ») ne sont pas des problèmes.
             DELETE FROM event WHERE level > 3 AND kind <> 'boot';
             """;
@@ -369,6 +367,23 @@ public sealed class Database
         return list;
     }
 
+    /// <summary>Vrai si, après <paramref name="after"/>, au moins une fenêtre de 10 s a eu son pic sous <paramref name="threshold"/>.</summary>
+    public bool PeakBelow(string key, long after, long to, double threshold)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT EXISTS (
+                SELECT 1 FROM sample s JOIN metric m ON m.id = s.metric_id
+                WHERE m.key = $key AND s.ts > $after AND s.ts <= $to AND s.max < $threshold)
+            """;
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$after", after);
+        command.Parameters.AddWithValue("$to", to);
+        command.Parameters.AddWithValue("$threshold", threshold);
+        return (long)command.ExecuteScalar()! == 1;
+    }
+
     /// <summary>Consommation de chaque application, fenêtre de 10 s par fenêtre (pour corréler avec des pics).</summary>
     public List<(long Ts, string Name, double Cpu, double Io, double Gpu)> ProcessWindows(long from, long to)
     {
@@ -555,6 +570,36 @@ public sealed class Database
         command.Parameters.AddWithValue("$end", end);
         command.Parameters.AddWithValue("$id", id);
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Au démarrage de l'agent : un gel resté ouvert date d'une exécution précédente, arrêtée avant sa fin
+    /// (extinction du PC, mise à jour de l'agent). On le clôt à la dernière fenêtre enregistrée par cette exécution,
+    /// dernier moment où l'on sait qu'il durait encore. Renvoie le début du plus ancien gel clos, s'il y en a.
+    /// </summary>
+    public long? CloseOrphanHangs(long now)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var find = connection.CreateCommand();
+        find.Transaction = transaction;
+        // -1 : ancienne marque « fin inconnue », posée par les versions précédentes.
+        find.CommandText = "SELECT MIN(start_ts) FROM hang WHERE end_ts IS NULL OR end_ts = -1";
+        if (find.ExecuteScalar() is not long earliest) return null;
+
+        using var close = connection.CreateCommand();
+        close.Transaction = transaction;
+        // L'exécution qui a vu le gel s'arrête au démarrage suivant de l'agent (ou maintenant, pour la dernière).
+        close.CommandText = """
+            UPDATE hang SET end_ts = MAX(start_ts, COALESCE((
+                SELECT MAX(p.ts) FROM proc_sample p
+                WHERE p.ts < COALESCE((SELECT MIN(r.start_ts) FROM agent_run r WHERE r.start_ts > hang.start_ts), $now)), start_ts))
+            WHERE end_ts IS NULL OR end_ts = -1
+            """;
+        close.Parameters.AddWithValue("$now", now);
+        close.ExecuteNonQuery();
+        transaction.Commit();
+        return earliest;
     }
 
     public List<HangItem> Hangs(long from, long to)

@@ -57,7 +57,10 @@ public sealed class CollectorHost : BackgroundService
         var last = TimeSpan.Zero;
         var tick = 0L;
         _logger.LogInformation("Échantillonnage toutes les {Interval} ms, base : {Path}", interval.TotalMilliseconds, _database.Path);
-        _database.RecordAgentStart(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var started = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        // Un gel resté ouvert n'est plus suivi par personne : on le clôt, et le serveur doit l'apprendre.
+        if (_database.CloseOrphanHangs(started) is { } earliest) UploadService.ResendHangsFrom(_database, earliest);
+        _database.RecordAgentStart(started);
 
         do
         {

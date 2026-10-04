@@ -48,6 +48,13 @@ public sealed class UploadService : BackgroundService
     public static string? ServerUrl(AgentOptions options, Database db) =>
         string.IsNullOrWhiteSpace(options.Server.Url) ? db.Get(ServerUrlKey) : options.Server.Url.TrimEnd('/');
 
+    /// <summary>Fait renvoyer les gels commencés depuis un instant : ceux dont la fin vient d'être corrigée après coup.</summary>
+    public static void ResendHangsFrom(Database db, long start)
+    {
+        if (long.TryParse(db.Get(HangsCursorKey), out var cursor) && cursor >= start)
+            db.Set(HangsCursorKey, (start - 1).ToString());
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         if (ServerUrl(_options, _db) is not { } server)
