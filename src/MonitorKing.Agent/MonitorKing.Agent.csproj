@@ -12,7 +12,7 @@
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
     <!-- Les releases remplacent ce numéro par celui du tag (voir .github/workflows/release-agent.yml). -->
-    <Version>0.3.1</Version>
+    <Version>0.3.2</Version>
     <SatelliteResourceLanguages>fr;en</SatelliteResourceLanguages>
     <AssemblyName>MonitorKing.Agent</AssemblyName>
     <RootNamespace>MonitorKing.Agent</RootNamespace>
