@@ -7,8 +7,8 @@ public sealed class UpdateSignature
 {
     // Moitié publique seulement. La clé privée ne va jamais sur GitHub : pirater le dépôt ou ses releases
     // ne suffit donc pas à faire accepter une mise à jour aux agents installés.
-    // Vide tant que la clé n'a pas été créée (scripts/new-signing-key.ps1) : aucune mise à jour n'est alors acceptée.
-    private const string ReleaseModulus = "";
+    // Ne jamais la remplacer : les agents déjà installés n'accepteraient plus aucune version.
+    private const string ReleaseModulus = "tfwGud2aJlox+7d/xG20sO8/9OodroRxxsjEwHpGR+XhKlyBVaSO9IR8WWblm0vumVRnvDEFrTyLgovjXr6ajIephDO/kVmvJPVlCb3wBy2eBab7R3yg5/U3zGiSMlCXPKOJmYItmJnaJLk9dqCW2+WGUaLeKACcGDaM7hhGwX9hd/WWE3ol9aE1sob90dRaooGrxM8lt2uTfJ/LM/fBdagAwoTvmESKma3/5dgDUqbxqIvsMnib56Eqi/mP9mtfJ8loueu+xn/V/a54CPBM39XmiiuqZt24Vps963eM8ZDnmHAJXFq0zxTuLpe2ka6QmeQsK89XVbe0x+zVfigHsVM1pGUASVqD3JsxD4K6Ovfpa9KdkuU4q1YKNWCUl4x1dPCLtKATQzDMxaCCoTEMjBP/wds1Fi/7JDH8KEQRq/E6d9Er73G/b1W1I3h+WMJMs1h4xu1eeMcmUfhlIuseaT7GBJEtzt5y9GEBKSvVPF3IPOsF/Qd9tEzpyaTjtbep";
     private const string ReleaseExponent = "AQAB";
     private const int MinimumKeyBits = 3072;
 

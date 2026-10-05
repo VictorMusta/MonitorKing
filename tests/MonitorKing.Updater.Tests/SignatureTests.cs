@@ -49,6 +49,14 @@ public class SignatureTests
     }
 
     [Fact]
+    public void La_cle_de_publication_embarquee_est_exploitable_et_n_accepte_pas_une_autre_cle()
+    {
+        Assert.True(UpdateSignature.Release.HasKey);
+        Assert.Equal(512, UpdateSignature.ReleasePublicModulus.Length);
+        Assert.False(UpdateSignature.Release.IsValid(Signed, TestKey.Publisher.Sign(Signed)));
+    }
+
+    [Fact]
     public void Refuse_une_cle_de_moins_de_3072_bits()
     {
         using var weak = RSA.Create(2048);
