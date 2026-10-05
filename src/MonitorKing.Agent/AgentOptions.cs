@@ -14,6 +14,8 @@ public sealed class AgentOptions
     public string? DataDirectory { get; set; }
     /// <summary>Nom affiché pour les sondes de la carte mère. Vide = déduit (fabricant + chipset, ex. « MSI B550 »).</summary>
     public string? MotherboardLabel { get; set; }
+    /// <summary>Mise à jour automatique de l'agent. Faux = aucune vérification, aucune requête vers GitHub.</summary>
+    public bool AutoUpdate { get; set; } = true;
     /// <summary>Envoi vers le serveur central (désactivé si l'adresse est vide).</summary>
     public ServerOptions Server { get; set; } = new();
 }

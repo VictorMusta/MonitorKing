@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Mise à jour automatique de l'agent. Aucune dépendance au reste du projet ni à un paquet tiers :
+       elle démarre en premier et doit fonctionner même si tout le reste est cassé. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>MonitorKing.Updater</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MonitorKing.Updater.Tests" />
+  </ItemGroup>
+
+</Project>

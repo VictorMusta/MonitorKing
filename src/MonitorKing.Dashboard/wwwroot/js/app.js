@@ -266,8 +266,10 @@ function renderFooter() {
     return;
   }
   const i = store.info;
+  // Mention discrète pendant une semaine quand la mise à jour automatique vient d'installer cette version.
+  const updated = i.updateInstalledAt && Date.now() - i.updateInstalledAt < 7 * 24 * 3600_000 ? ` (mis à jour ${f.ago(i.updateInstalledAt)})` : '';
   footer.innerHTML = `
-    <span>MonitorKing v${f.esc(i.agentVersion)} · lecture seule</span>
+    <span>MonitorKing v${f.esc(i.agentVersion)}${f.esc(updated)} · lecture seule</span>
     <span title="${f.esc(i.dataPath)}">Données locales, conservées ${i.retentionDays} jours</span>
     <button id="show-privacy">Confidentialité et envoi</button>
     <button id="show-status">État des collecteurs</button>`;

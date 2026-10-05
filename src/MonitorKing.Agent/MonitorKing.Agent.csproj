@@ -11,8 +11,8 @@
          et rend peu la mémoire ; l'agent montait à ~1 Go sur un processeur 16 threads. -->
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
-    <!-- Les releases remplacent ce numéro par celui du tag (voir .github/workflows/release-agent.yml). -->
-    <Version>0.3.2</Version>
+    <!-- Seule source du numéro de version : scripts/release.ps1 en tire le tag, l'archive et le manifeste de mise à jour. -->
+    <Version>0.4.0</Version>
     <SatelliteResourceLanguages>fr;en</SatelliteResourceLanguages>
     <AssemblyName>MonitorKing.Agent</AssemblyName>
     <RootNamespace>MonitorKing.Agent</RootNamespace>
@@ -37,6 +37,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MonitorKing.Core\MonitorKing.Core.csproj" />
+    <ProjectReference Include="..\MonitorKing.Updater\MonitorKing.Updater.csproj" />
   </ItemGroup>
 
 </Project>

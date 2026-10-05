@@ -41,6 +41,9 @@ export const api = {
   backToDiscreet: () => send('POST', '/privacy/discreet'),
   rotateReadKey: () => send('POST', '/privacy/rotate-key'),
   pseudonyms: () => get('/pseudonyms', '/api'),
+  // Agent : mise à jour automatique (réglée sur le PC lui-même)
+  update: () => get('/update', '/api'),
+  setAutoUpdate: (enabled) => send('POST', '/update/auto', { enabled }),
   // Machine courante
   info: () => get('/info'),
   status: () => get('/status'),

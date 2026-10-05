@@ -4,6 +4,10 @@ using MonitorKing.Agent;
 // MonitorKing — agent local, en lecture seule.
 // Il observe le PC et sert le dashboard sur http://localhost uniquement : aucun port n'est ouvert sur le réseau,
 // et aucune route ne permet d'agir sur la machine.
+
+// La mise à jour passe avant tout le reste : si une version plus récente est déjà installée, elle prend le relais ici.
+if (AgentUpdate.HandOver(args, out var exitCode)) return exitCode;
+
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -11,34 +15,47 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 
 var options = builder.Configuration.GetSection("MonitorKing").Get<AgentOptions>() ?? new AgentOptions();
-builder.WebHost.ConfigureKestrel(kestrel => kestrel.ListenLocalhost(options.Port));
+var updater = AgentUpdate.Start(args, options.AutoUpdate);
 
-builder.Services.AddSingleton(options);
-builder.Services.AddSingleton<MachineInfo>();
-builder.Services.AddSingleton(_ => new Database(AgentMachine.DatabasePath(options)));
-builder.Services.AddSingleton<DiagnosisEngine>();
-builder.Services.AddSingleton<ReportBuilder>();
-builder.Services.AddSingleton<CollectorHost>();
-builder.Services.AddSingleton<AgentMachine>();
-builder.Services.AddSingleton<Privacy>();
-builder.Services.AddHostedService(provider => provider.GetRequiredService<CollectorHost>());
-builder.Services.AddHostedService<EventLogService>();
-builder.Services.AddHostedService<UploadService>();
-builder.Services.AddHttpClient();
-builder.Services.ConfigureHttpJsonOptions(json =>
+try
 {
-    json.SerializerOptions.NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals;
-    json.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
-});
+    builder.WebHost.ConfigureKestrel(kestrel => kestrel.ListenLocalhost(options.Port));
 
-var app = builder.Build();
+    builder.Services.AddSingleton(options);
+    builder.Services.AddSingleton(updater);
+    builder.Services.AddSingleton<MachineInfo>();
+    builder.Services.AddSingleton(_ => new Database(AgentMachine.DatabasePath(options)));
+    builder.Services.AddSingleton<DiagnosisEngine>();
+    builder.Services.AddSingleton<ReportBuilder>();
+    builder.Services.AddSingleton<CollectorHost>();
+    builder.Services.AddSingleton<AgentMachine>();
+    builder.Services.AddSingleton<Privacy>();
+    builder.Services.AddHostedService(provider => provider.GetRequiredService<CollectorHost>());
+    builder.Services.AddHostedService<EventLogService>();
+    builder.Services.AddHostedService<UploadService>();
+    builder.Services.AddHttpClient();
+    builder.Services.ConfigureHttpJsonOptions(json =>
+    {
+        json.SerializerOptions.NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals;
+        json.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    });
 
-app.UseDefaultFiles();
-app.UseStaticFiles(new StaticFileOptions
+    var app = builder.Build();
+
+    app.UseDefaultFiles();
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache",
+    });
+    app.MapAgentApi();
+
+    app.Lifetime.ApplicationStarted.Register(() => AgentUpdate.ConfirmWhenStable(updater, app.Lifetime.ApplicationStopping));
+    app.Logger.LogInformation("MonitorKing (lecture seule) : http://localhost:{Port}", options.Port);
+    app.Run();
+    return 0;
+}
+catch (Exception failure) when (!builder.Environment.IsDevelopment())
 {
-    OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache",
-});
-app.MapAgentApi();
-
-app.Logger.LogInformation("MonitorKing (lecture seule) : http://localhost:{Port}", options.Port);
-app.Run();
+    // Un agent installé qui ne démarre plus laisse à la mise à jour le temps de lui trouver un correctif.
+    return AgentUpdate.WaitForFix(updater, args, failure);
+}

@@ -1,6 +1,9 @@
 using System.Text.Json;
+using MonitorKing.Updater;
 
 namespace MonitorKing.Agent;
+
+public sealed record AutoUpdateRequest(bool Enabled);
 
 /// <summary>
 /// API locale du dashboard. Toutes les routes sont en lecture, sauf l'enregistrement de la disposition
@@ -14,8 +17,10 @@ public static class Api
     {
         var api = app.MapGroup("/api");
 
-        api.MapGet("/info", (MachineInfo info, Database db, AgentOptions options) => new
+        api.MapGet("/info", (MachineInfo info, Database db, AgentOptions options, AutoUpdater updater) => new
         {
+            // Date de la mise à jour automatique qui a installé la version en cours (mention discrète en pied de page).
+            UpdateInstalledAt = updater.Status is { InstalledVersion: { } installed, InstalledAt: { } at } && installed == info.AgentVersion ? at : (long?)null,
             info.MachineName,
             info.Os,
             info.Cpu,
@@ -134,6 +139,16 @@ public static class Api
         {
             privacy.RotateReadKey();
             return Results.Ok(new { privacy.ReadKey });
+        });
+
+        // Mise à jour automatique : son état, et le réglage pour la couper. Comme la confidentialité, c'est le PC qui décide.
+        api.MapGet("/update", (AutoUpdater updater) => updater.Status);
+
+        // Corps JSON exigé : une page web d'un autre site ne peut pas l'envoyer sans l'accord du navigateur.
+        api.MapPost("/update/auto", (AutoUpdateRequest request, AutoUpdater updater) =>
+        {
+            updater.SetEnabled(request.Enabled);
+            return updater.Status;
         });
 
         // Correspondance pseudonyme → application, pour que l'utilisateur retrouve ce dont Victor lui parle.

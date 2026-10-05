@@ -724,8 +724,9 @@ export function fleet(root, ctx) {
 export async function showPrivacy(dialog, ctx) {
   let state;
   let pseudonyms;
+  let update;
   try {
-    [state, pseudonyms] = await Promise.all([api.privacy(), api.pseudonyms()]);
+    [state, pseudonyms, update] = await Promise.all([api.privacy(), api.pseudonyms(), api.update()]);
   } catch (e) {
     ctx.toast(e.message);
     return;
@@ -761,6 +762,15 @@ export async function showPrivacy(dialog, ctx) {
             <button type="button" class="btn small" data-key="copy">Copier</button>
             <button type="button" class="btn small" data-key="rotate">Renouveler la clé</button>
           </div>
+          <h3 style="font-size:14px;margin:18px 0 8px">Mises à jour automatiques</h3>
+          <p class="secondary">MonitorKing v${f.esc(update.currentVersion)}. ${update.enabled
+            ? 'Environ toutes les 6 heures, l’agent regarde sur GitHub si une version plus récente est publiée. Il la télécharge, vérifie sa signature, et la lance au prochain démarrage. Rien n’est envoyé.'
+            : update.disabledByConfiguration
+              ? '<b>Coupées par la configuration de cet agent</b> : il ne contacte pas GitHub.'
+              : '<b>Désactivées</b> : l’agent ne contacte pas GitHub et ne se met plus à jour tout seul.'}</p>
+          ${update.readyVersion ? `<p class="secondary"><b>Version ${f.esc(update.readyVersion)} prête</b> : elle sera lancée au prochain démarrage de l’agent.</p>` : ''}
+          ${update.lastResult ? `<p class="muted" style="font-size:12px">Dernière vérification ${f.esc(f.ago(update.lastCheck))} · ${f.esc(update.lastResult)}</p>` : ''}
+          ${update.disabledByConfiguration ? '' : `<div class="toolbar"><button type="button" class="btn small" data-update="${update.enabled ? 'off' : 'on'}">${update.enabled ? 'Désactiver les mises à jour automatiques' : 'Réactiver les mises à jour automatiques'}</button></div>`}
           <h3 style="font-size:14px;margin:18px 0 8px">Retrouver une application à partir de son pseudonyme</h3>
           <input class="search" data-filter type="search" placeholder="Pseudonyme ou nom (ex. 7F3A, steam)" value="${f.esc(filter)}" style="width:100%">
           <div class="table-wrap" style="margin-top:8px"><table class="data"><thead><tr><th>Application</th><th>Côté serveur</th></tr></thead><tbody>
@@ -789,6 +799,15 @@ export async function showPrivacy(dialog, ctx) {
         ctx.toast(e.message);
       }
     }));
+    dialog.querySelector('[data-update]')?.addEventListener('click', async (event) => {
+      try {
+        update = await api.setAutoUpdate(event.currentTarget.dataset.update === 'on');
+        render(filter);
+        ctx.toast(update.enabled ? 'Mises à jour automatiques réactivées.' : 'Mises à jour automatiques désactivées.');
+      } catch (e) {
+        ctx.toast(e.message);
+      }
+    });
     dialog.querySelector('[data-key="copy"]').addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(state.readKey);

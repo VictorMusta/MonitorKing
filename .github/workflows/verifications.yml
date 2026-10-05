@@ -1,0 +1,54 @@
+# Vérifie chaque envoi : le dashboard se charge, tout compile, les tests passent et l'agent publié démarre pour de vrai.
+# Les releases ne se font pas ici mais avec scripts/release.ps1, sur le PC qui détient la clé de signature :
+# une clé rangée dans GitHub permettrait à qui pirate le dépôt de pousser une mise à jour aux agents installés.
+name: Vérifications
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  agent:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Vérifier que le dashboard se charge (syntaxe, imports)
+        run: node src/MonitorKing.Dashboard/check.mjs
+
+      - name: Compiler toute la solution (agent, serveur, moteur commun, mise à jour)
+        run: dotnet build MonitorKing.sln -c Release
+
+      - name: Lancer les tests
+        run: dotnet test MonitorKing.sln -c Release --no-build
+
+      - name: Publier l'agent autonome (Windows x64)
+        run: dotnet publish src/MonitorKing.Agent -c Release -r win-x64 --self-contained true -o out/MonitorKing-Agent
+
+      # L'agent publié (autonome) n'embarque pas forcément les mêmes composants que celui de développement :
+      # on le lance pour de vrai et on interroge quelques routes.
+      - name: Tester l'agent publié (démarre et répond)
+        shell: pwsh
+        run: |
+          $agent = Start-Process out/MonitorKing-Agent/MonitorKing.Agent.exe -PassThru -ArgumentList '--MonitorKing:Port=5799', "--MonitorKing:DataDirectory=$env:RUNNER_TEMP/mk-test", '--MonitorKing:AutoUpdate=false'
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
+              Start-Sleep -Milliseconds 500
+              try { $ready = (Invoke-WebRequest -UseBasicParsing http://localhost:5799/api/info).StatusCode -eq 200 } catch { }
+            }
+            if (-not $ready) { throw "L'agent publié ne répond pas sur /api/info" }
+            foreach ($path in '/', '/api/privacy', '/api/events', '/api/update', '/api/breakdown?resource=cpu&minutes=30') {
+              $code = (Invoke-WebRequest -UseBasicParsing "http://localhost:5799$path").StatusCode
+              Write-Host "$path -> $code"
+            }
+          }
+          finally { Stop-Process -Id $agent.Id -Force -ErrorAction SilentlyContinue }
