@@ -3,6 +3,7 @@ using MonitorKing.Core;
 using MonitorKing.Core.Diagnosis;
 using MonitorKing.Core.Reports;
 using MonitorKing.Core.Sync;
+using MonitorKing.Core.Web;
 
 namespace MonitorKing.Server;
 
@@ -57,7 +58,9 @@ public static class Endpoints
     /// <summary>API du dashboard (derrière le mot de passe de Caddy) : la liste des PC, puis une API par PC.</summary>
     public static void MapDashboardApi(this WebApplication app)
     {
-        var api = app.MapGroup("/api");
+        // Le navigateur joint le mot de passe mémorisé à toute requête vers ce site, même lancée par la page d'un autre :
+        // les écritures ne sont acceptées que du dashboard lui-même (ou d'un outil sans navigateur, comme curl).
+        var api = app.MapGroup("/api").RefuseCrossSiteWrites();
 
         api.MapGet("/mode", () => new { Mode = "server" });
 

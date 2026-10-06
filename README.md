@@ -88,9 +88,10 @@ Le format du manifeste (`update-manifest.txt`, décrit dans `UpdateManifest.cs`)
 ## Architecture
 
 ```
-src/MonitorKing.Core/        moteur commun (sans Windows) : modèles, SQLite, diagnostic, rapports, contrat d'envoi
+src/MonitorKing.Core/        moteur commun (sans Windows) : modèles, SQLite, diagnostic, rapports, contrat d'envoi,
+                             refus des écritures venues d'un autre site (CSRF) sur les deux API
 src/MonitorKing.Updater/     mise à jour automatique de l'agent, sans dépendance : manifeste signé, téléchargement, installation
-tests/                       tests automatiques de la mise à jour
+tests/                       tests automatiques de la mise à jour et de la protection des API
 src/MonitorKing.Agent/       Windows : collecteurs, journaux d'événements, mode discret, envoi vers le serveur
   Collectors/                CPU par cœur, processus (NtQuerySystemInformation), GPU, capteurs (LibreHardwareMonitor),
                              Wi-Fi, fenêtres « Ne répond pas »

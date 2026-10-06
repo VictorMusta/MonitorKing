@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MonitorKing.Core.Web;
 using MonitorKing.Updater;
 
 namespace MonitorKing.Agent;
@@ -15,7 +16,9 @@ public static class Api
 
     public static void MapAgentApi(this WebApplication app)
     {
-        var api = app.MapGroup("/api");
+        // Écouter sur localhost ne suffit pas : une page d'un autre site, ouverte dans le navigateur de ce PC, l'atteint aussi.
+        // Les écritures (partage complet, clé de lecture, mise à jour, disposition) ne sont acceptées que du dashboard lui-même.
+        var api = app.MapGroup("/api").RefuseCrossSiteWrites();
 
         api.MapGet("/info", (MachineInfo info, Database db, AgentOptions options, AutoUpdater updater) => new
         {

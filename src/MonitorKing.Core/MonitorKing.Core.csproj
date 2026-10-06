@@ -14,4 +14,9 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- ASP.NET Core, que l'agent et le serveur embarquent déjà : pour la protection commune à leurs deux API (Web/). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>
