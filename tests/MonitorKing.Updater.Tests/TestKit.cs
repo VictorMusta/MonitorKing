@@ -11,19 +11,24 @@ internal sealed class TestKey
 {
     private readonly RSA _rsa = RSA.Create(3072);
 
+    public TestKey()
+    {
+        // RSA.Create ne génère la clé qu'à son premier usage, et pas à l'abri de deux fils d'exécution : deux tests
+        // lancés en même temps obtenaient chacun la leur, et la signature « de la bonne clé » était refusée de temps
+        // en temps. On la génère donc ici, avant que quiconque s'en serve.
+        var parameters = _rsa.ExportParameters(false);
+        Signature = new UpdateSignature(Convert.ToBase64String(parameters.Modulus!), Convert.ToBase64String(parameters.Exponent!));
+    }
+
     public static TestKey Publisher { get; } = new();
     public static TestKey Stranger { get; } = new();
 
-    public UpdateSignature Signature
-    {
-        get
-        {
-            var parameters = _rsa.ExportParameters(false);
-            return new UpdateSignature(Convert.ToBase64String(parameters.Modulus!), Convert.ToBase64String(parameters.Exponent!));
-        }
-    }
+    public UpdateSignature Signature { get; }
 
-    public string Sign(byte[] signed) => Convert.ToBase64String(_rsa.SignData(signed, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+    public string Sign(byte[] signed)
+    {
+        lock (_rsa) return Convert.ToBase64String(_rsa.SignData(signed, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+    }
 }
 
 internal static class Release
