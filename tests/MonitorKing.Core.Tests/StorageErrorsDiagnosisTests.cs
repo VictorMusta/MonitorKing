@@ -16,8 +16,9 @@ public class StorageErrorsDiagnosisTests
 
     private static readonly (int Index, string Label)[] InternalDisks = { (0, Hdd), (1, Nvme) };
 
-    private static EventCount Error(string? device, int count, int eventId = 51, string provider = "disk") =>
-        new("disk", provider, eventId, "Erreur d'écriture disque pendant la pagination", device, count, count, Now - 3600_000);
+    /// <summary>Des erreurs de stockage sur un périphérique ; la dernière date d'une heure, hors des deux minutes analysées, sauf mention contraire.</summary>
+    private static EventCount Error(string? device, int count, int eventId = 51, string provider = "disk", long last = Now - 3600_000) =>
+        new("disk", provider, eventId, "Erreur d'écriture disque pendant la pagination", device, count, count, last);
 
     /// <summary>Diagnostic d'un PC dont les disques donnés sont en service (mesurés pendant la fenêtre).</summary>
     private static DiagnosisResult Analyze(IEnumerable<EventCount> events, (int Index, string Label)[]? disks = null, bool live = true)
@@ -89,6 +90,35 @@ public class StorageErrorsDiagnosisTests
         Assert.Contains("Windows redonne son numéro et sa lettre au prochain support branché, qui n'y est pour rien", finding.Detail);
         Assert.DoesNotContain(label, finding.Detail);
         Assert.DoesNotContain(Backup, finding.Detail);
+    }
+
+    [Fact]
+    public void Des_erreurs_en_cours_sur_un_support_externe_branche_le_mettent_en_cause()
+    {
+        // Les erreurs datent des deux minutes analysées et un disque externe est branché sous ce numéro : c'est bien lui.
+        var disks = InternalDisks.Append((2, "Disque E: (SSD USB EXEMPLE Portable 500)")).ToArray();
+        var result = Analyze(new[] { Error("2", 36, eventId: 153, last: Now - 30_000), Error("2", 400), Error("3", 22) }, disks);
+
+        var finding = Assert.Single(Storage(result));
+        Assert.Equal("warning", finding.Severity);
+        Assert.Equal("Un support amovible ou débranché signale des erreurs (458 fois en 7 jours)", finding.Title);
+        Assert.Contains("Elles sont encore en cours sur le disque n° 2 : le support externe branché en ce moment est donc en cause.", finding.Detail);
+        Assert.DoesNotContain("qui n'y est pour rien", finding.Detail);
+        Assert.DoesNotContain("EXEMPLE", finding.Detail);
+    }
+
+    [Fact]
+    public void Des_erreurs_recentes_ne_mettent_en_cause_que_le_support_encore_branche()
+    {
+        // Le support vient d'être retiré : plus aucun disque sous ce numéro, personne à désigner.
+        var removed = Analyze(new[] { Error("2", 36, last: Now - 30_000) });
+        Assert.Contains("peut-être retiré depuis", Assert.Single(Storage(removed)).Detail);
+        Assert.DoesNotContain("en cours", Assert.Single(Storage(removed)).Detail);
+
+        // Et sur une période passée, rien n'est « en cours ».
+        var disks = InternalDisks.Append((2, "Disque E: (USB Generic STORAGE DEVICE)")).ToArray();
+        var past = Analyze(new[] { Error("2", 36, last: Now - 30_000) }, disks, live: false);
+        Assert.Contains("peut-être retiré depuis", Assert.Single(Storage(past)).Detail);
     }
 
     [Theory]

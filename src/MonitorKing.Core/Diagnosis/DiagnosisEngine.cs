@@ -320,6 +320,7 @@ public sealed class DiagnosisEngine
         var onInternal = new Dictionary<int, int>();   // numéro du disque interne → erreurs
         var elsewhere = new Dictionary<string, int>(); // périphérique qui n'est pas un disque interne en service → erreurs
         var unplaced = new Dictionary<string, int>();  // périphérique nommé par Windows, mais de nature inconnue → erreurs
+        var ongoing = new SortedSet<string>(StringComparer.Ordinal); // supports externes branchés dont les erreurs datent des dernières minutes
         var onSomeNvme = 0;
         var unnamed = 0;
         static void Add<TKey>(Dictionary<TKey, int> counts, TKey key, int count) where TKey : notnull =>
@@ -348,9 +349,11 @@ public sealed class DiagnosisEngine
                         Add(onInternal, index, e.Count);
                         break;
                     // Un support externe n'est désigné que par son numéro : Windows le redonne au prochain support branché,
-                    // et le nom affiché aujourd'hui sous ce numéro n'est pas forcément celui du fautif.
+                    // et le nom affiché aujourd'hui sous ce numéro n'est pas forcément celui du fautif. Sauf si les erreurs
+                    // datent des minutes analysées : elles viennent alors bien du support branché en ce moment.
                     case false:
                         Add(elsewhere, e.Device, e.Count);
+                        if (w.Live && e.Last >= w.From) ongoing.Add(e.Device);
                         break;
                     default:
                         Add(unplaced, e.Device, e.Count);
@@ -377,10 +380,12 @@ public sealed class DiagnosisEngine
 
         if (elsewhere.Count > 0)
         {
+            var which = ongoing.Count > 0
+                ? $"Sans doute une carte SD, une clé USB ou un disque externe. Elles sont encore en cours sur {string.Join(" et ", ongoing.Select(d => "le " + StorageDevice.Describe(d)))} : le support externe branché en ce moment est donc en cause. "
+                : "Sans doute une carte SD, une clé USB ou un disque externe, peut-être retiré depuis : Windows redonne son numéro et sa lettre au prochain support branché, qui n'y est pour rien. ";
             findings.Add(new Finding("warning", "hardware",
                 $"Un support amovible ou débranché signale des erreurs ({Times(elsewhere.Values.Sum())}{span})",
-                $"Ces erreurs ne viennent pas d'un disque interne en service sur ce PC mais de : {Devices(elsewhere)}. " +
-                "Sans doute une carte SD, une clé USB ou un disque externe, peut-être retiré depuis : Windows redonne son numéro et sa lettre au prochain support branché, qui n'y est pour rien. " +
+                $"Ces erreurs ne viennent pas d'un disque interne en service sur ce PC mais de : {Devices(elsewhere)}. " + which +
                 "Causes fréquentes : support retiré pendant une écriture, mauvais contact, carte ou clé en fin de vie. " +
                 "Si elles reviennent avec le même support, copie ses données ailleurs et remplace-le."));
         }
