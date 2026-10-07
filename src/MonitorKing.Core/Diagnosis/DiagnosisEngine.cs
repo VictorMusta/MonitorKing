@@ -23,7 +23,13 @@ public sealed class WindowData
     public required bool Live { get; init; }
     public required Dictionary<string, (double Avg, double Max, double Last)> Metrics { get; init; }
     public required List<ProcRow> Processes { get; init; }
-    public required List<EventItem> Events { get; init; }
+    /// <summary>
+    /// Ce que Windows a signalé, compté par nature, titre et périphérique visé :
+    /// les 7 derniers jours en direct, la période elle-même sinon.
+    /// </summary>
+    public required List<EventCount> EventCounts { get; init; }
+    /// <summary>Les événements de la période un par un, pour le rapport ; le diagnostic ne lit que les totaux.</summary>
+    public List<EventItem> Events { get; init; } = new();
     public required List<HangItem> Hangs { get; init; }
     public List<HungWindow> ActiveHangs { get; init; } = new();
     public List<SensorReading> Sensors { get; init; } = new();
@@ -238,10 +244,10 @@ public sealed class DiagnosisEngine
             }
         }
 
-        var throttling = w.Events.Where(e => e.Kind == "thermal" && e.Ts >= w.To - 24 * 3600_000L).ToList();
-        if (throttling.Count > 0)
+        var throttling = w.EventCounts.Where(e => e.Kind == "thermal").Sum(e => e.LastDay);
+        if (throttling > 0)
         {
-            findings.Add(new Finding("warning", "thermal", $"Le processeur a été bridé {Times(throttling.Count)} en 24 h",
+            findings.Add(new Finding("warning", "thermal", $"Le processeur a été bridé {Times(throttling)} en 24 h",
                 "Le firmware a réduit la fréquence du processeur, le plus souvent à cause de la chaleur ou d'une limite d'alimentation."));
         }
     }
@@ -266,33 +272,176 @@ public sealed class DiagnosisEngine
 
     private static void Events(WindowData w, List<Finding> findings)
     {
-        var dayAgo = w.Live ? w.To - 24 * 3600_000L : w.From;
-        var weekAgo = w.Live ? w.To - 7 * 24 * 3600_000L : w.From;
-
-        foreach (var crashes in w.Events.Where(e => e.Kind == "crash" && e.Ts >= dayAgo).GroupBy(e => e.Title).OrderByDescending(g => g.Count()).Take(3))
+        // En direct, les signalements couvrent 7 jours, mais seuls les plantages des dernières 24 h comptent.
+        var crashes = w.EventCounts.Where(e => e.Kind == "crash")
+            .GroupBy(e => e.Title)
+            .Select(g => (Title: g.Key, Count: g.Sum(e => w.Live ? e.LastDay : e.Count), Last: g.Max(e => e.Last)))
+            .Where(c => c.Count > 0)
+            .OrderByDescending(c => c.Count)
+            .ThenByDescending(c => c.Last)
+            .Take(3);
+        foreach (var crash in crashes)
         {
-            var app = crashes.Key.Replace("Plantage : ", "");
-            findings.Add(new Finding("warning", "crash", $"{app} a planté {Times(crashes.Count())}{(w.Live ? " en 24 h" : "")}",
+            var app = crash.Title.Replace("Plantage : ", "");
+            findings.Add(new Finding("warning", "crash", $"{app} a planté {Times(crash.Count)}{(w.Live ? " en 24 h" : "")}",
                 "Détail dans l'onglet Journal.", app));
         }
 
-        void Recent(string kind, string severity, string title, string detail, Func<EventItem, bool>? filter = null)
+        void Recent(string kind, string severity, string title, string detail, Func<EventCount, bool>? filter = null)
         {
-            var events = w.Events.Where(e => e.Kind == kind && e.Ts >= weekAgo && (filter is null || filter(e))).ToList();
-            if (events.Count == 0) return;
+            var count = w.EventCounts.Where(e => e.Kind == kind && (filter is null || filter(e))).Sum(e => e.Count);
+            if (count == 0) return;
             findings.Add(new Finding(severity, kind is "disk" or "hardware" ? "hardware" : "system",
-                $"{title} ({Times(events.Count)}{(w.Live ? " en 7 jours" : "")})", detail));
+                $"{title} ({Times(count)}{(w.Live ? " en 7 jours" : "")})", detail));
         }
 
         Recent("bsod", "critical", "Écran bleu", "Le système a planté. Le code d'arrêt est dans le Journal : il oriente vers un pilote ou un composant.");
         Recent("power", "warning", "Redémarrage inattendu", "Coupure de courant, plantage complet ou appui long sur le bouton d'alimentation.");
-        Recent("disk", "critical", "Le disque signale des erreurs", "Sauvegarde tes données importantes : un disque qui signale des erreurs peut lâcher sans prévenir.",
-            e => e.EventId != 129);
+        StorageErrors(w, findings);
         Recent("disk", "warning", "Le contrôleur de stockage a été réinitialisé", "Le disque a cessé de répondre quelques secondes. Causes fréquentes : câble SATA, pilote de stockage, disque fatigué.",
             e => e.EventId == 129);
         Recent("hardware", "warning", "Erreur matérielle signalée", "Le processeur, la mémoire ou le bus PCIe a corrigé une erreur. Isolée, ce n'est pas grave ; répétée, c'est un signal.");
         Recent("memory", "warning", "Windows a manqué de mémoire virtuelle", "Des applications ont pu planter ou refuser de s'ouvrir. Le Journal indique les plus gros consommateurs à ce moment-là.");
         Recent("gpu", "warning", "Le pilote graphique a planté", "Écran noir quelques secondes puis retour : pilote instable, surchauffe ou overclocking trop poussé.");
+    }
+
+    /// <summary>
+    /// Erreurs de stockage signalées par Windows, attribuées à leur périphérique. Seul un disque interne en service
+    /// justifie l'alerte « sauvegarde tes données » : une carte SD ou une clé USB défaillante remplit le journal
+    /// des mêmes événements sans que les disques du PC soient en cause.
+    /// </summary>
+    private static void StorageErrors(WindowData w, List<Finding> findings)
+    {
+        var errors = w.EventCounts.Where(e => e.Kind == "disk" && e.EventId != 129).ToList();
+        if (errors.Count == 0) return;
+
+        var disks = MeasuredDisks(w);
+        var nvme = disks.Where(d => IsInternal(d.Value) == true && d.Value.Contains("NVMe", StringComparison.Ordinal)).Select(d => d.Key).ToList();
+        var onInternal = new Dictionary<int, int>();   // numéro du disque interne → erreurs
+        var elsewhere = new Dictionary<string, int>(); // périphérique qui n'est pas un disque interne en service → erreurs
+        var unplaced = new Dictionary<string, int>();  // périphérique nommé par Windows, mais de nature inconnue → erreurs
+        var onSomeNvme = 0;
+        var unnamed = 0;
+        static void Add<TKey>(Dictionary<TKey, int> counts, TKey key, int count) where TKey : notnull =>
+            counts[key] = counts.GetValueOrDefault(key) + count;
+
+        foreach (var e in errors)
+        {
+            if (e.Device is null)
+            {
+                // Le pilote NVMe ne nomme que le port du contrôleur (\Device\RaidPort0) : l'erreur vise forcément
+                // un SSD NVMe du PC, et on sait lequel quand il n'y en a qu'un.
+                if (!e.Provider.Equals("stornvme", StringComparison.OrdinalIgnoreCase)) unnamed += e.Count;
+                else if (nvme is [var only]) Add(onInternal, only, e.Count);
+                else onSomeNvme += e.Count;
+            }
+            else if (MeasuredDisk(e.Device, disks) is not { } index)
+            {
+                // Aucun disque en service sous ce numéro ou cette lettre. Sans aucun disque mesuré, on ne peut rien en conclure.
+                Add(disks.Count > 0 ? elsewhere : unplaced, e.Device, e.Count);
+            }
+            else
+            {
+                switch (IsInternal(disks[index]))
+                {
+                    case true:
+                        Add(onInternal, index, e.Count);
+                        break;
+                    // Un support externe n'est désigné que par son numéro : Windows le redonne au prochain support branché,
+                    // et le nom affiché aujourd'hui sous ce numéro n'est pas forcément celui du fautif.
+                    case false:
+                        Add(elsewhere, e.Device, e.Count);
+                        break;
+                    default:
+                        Add(unplaced, e.Device, e.Count);
+                        break;
+                }
+            }
+        }
+
+        var span = w.Live ? " en 7 jours" : "";
+        const string backup = "Sauvegarde tes données importantes : un disque qui signale des erreurs peut lâcher sans prévenir.";
+
+        foreach (var (index, count) in onInternal.OrderByDescending(d => d.Value).ThenBy(d => d.Key))
+        {
+            // « Disque C: (SSD NVMe …) » devient le sujet de la phrase.
+            findings.Add(new Finding("critical", "hardware", $"Le d{disks[index][1..]} signale des erreurs ({Times(count)}{span})",
+                $"{backup} Windows le numérote « disque {index} » (détail dans l'onglet Journal)."));
+        }
+
+        if (onSomeNvme > 0)
+        {
+            findings.Add(new Finding("critical", "hardware", $"Un SSD NVMe signale des erreurs ({Times(onSomeNvme)}{span})",
+                $"{backup} Le pilote NVMe de Windows ne dit pas lequel."));
+        }
+
+        if (elsewhere.Count > 0)
+        {
+            findings.Add(new Finding("warning", "hardware",
+                $"Un support amovible ou débranché signale des erreurs ({Times(elsewhere.Values.Sum())}{span})",
+                $"Ces erreurs ne viennent pas d'un disque interne en service sur ce PC mais de : {Devices(elsewhere)}. " +
+                "Sans doute une carte SD, une clé USB ou un disque externe, peut-être retiré depuis : Windows redonne son numéro et sa lettre au prochain support branché, qui n'y est pour rien. " +
+                "Causes fréquentes : support retiré pendant une écriture, mauvais contact, carte ou clé en fin de vie. " +
+                "Si elles reviennent avec le même support, copie ses données ailleurs et remplace-le."));
+        }
+
+        if (unnamed + unplaced.Count > 0)
+        {
+            var which = unplaced.Count > 0
+                ? $"Windows désigne : {Devices(unplaced)}. MonitorKing n'en a pas de description sur cette période : impossible de dire s'il s'agit d'un disque interne. "
+                : "Le périphérique n'est pas connu ici (Windows ne le nomme pas, ou l'agent de ce PC ne l'a pas transmis) : ce peut être un disque interne comme une carte SD ou une clé USB. ";
+            findings.Add(new Finding("warning", "hardware",
+                $"Un périphérique de stockage non identifié signale des erreurs ({Times(unnamed + unplaced.Values.Sum())}{span})",
+                which + "Le message complet de Windows est dans le Journal, sur le PC lui-même. S'il s'agit d'un disque interne, sauvegarde tes données importantes."));
+        }
+    }
+
+    /// <summary>
+    /// Vrai pour un disque interne, faux pour un support externe (USB, carte SD), null quand l'agent n'a pas su décrire
+    /// le disque (« Disque 3 » sans modèle, ou mesures reçues sans leur libellé) : rien ne dit alors ce que c'est.
+    /// </summary>
+    private static bool? IsInternal(string label) =>
+        label.StartsWith("Disque ", StringComparison.Ordinal) && label.Contains('(') ? !StorageDevice.IsExternalDisk(label) : null;
+
+    /// <summary>Disques mesurés pendant la fenêtre, donc en service : numéro Windows → nom (« Disque C: (SSD NVMe …) »).</summary>
+    private static Dictionary<int, string> MeasuredDisks(WindowData w)
+    {
+        var disks = new Dictionary<int, string>();
+        foreach (var key in w.Metrics.Keys)
+        {
+            if (key.Split('.') is not ["disk", var number, "active"] || !int.TryParse(number, out var index)) continue;
+            disks[index] = (w.Labels.GetValueOrDefault(key) ?? $"Disque {index}").Replace(" · activité", "");
+        }
+
+        return disks;
+    }
+
+    /// <summary>Le disque en service que désigne un périphérique : par son numéro, ou par la lettre d'un de ses volumes.</summary>
+    private static int? MeasuredDisk(string device, Dictionary<int, string> disks)
+    {
+        if (StorageDevice.DiskNumber(device) is { } number) return disks.ContainsKey(number) ? number : null;
+        foreach (var (index, label) in disks)
+        {
+            // « Disque C: D: (HDD …) » : les lettres des volumes suivent le mot « Disque ».
+            if (label.Split(' ').Skip(1).TakeWhile(part => part.Length == 2 && part[1] == ':').Contains(device)) return index;
+        }
+
+        return null;
+    }
+
+    /// <summary>« disque n° 3, disque n° 2 et volume E: (numéros de la Gestion des disques de Windows) », les plus touchés d'abord.</summary>
+    private static string Devices(Dictionary<string, int> errors)
+    {
+        var names = errors.OrderByDescending(d => d.Value)
+            .ThenBy(d => d.Key, StringComparer.Ordinal)
+            .Select(d => StorageDevice.Describe(d.Key))
+            .ToList();
+        var shown = names.Take(4).ToList();
+        var text = names.Count > shown.Count ? $"{string.Join(", ", shown)} et {names.Count - shown.Count} autre{(names.Count - shown.Count > 1 ? "s" : "")}"
+            : shown.Count > 1 ? $"{string.Join(", ", shown.Take(shown.Count - 1))} et {shown[^1]}"
+            : shown[0];
+        var numbers = errors.Keys.Count(d => StorageDevice.DiskNumber(d) is not null);
+        return numbers == 0 ? text : $"{text} ({(numbers > 1 ? "numéros" : "numéro")} de la Gestion des disques de Windows)";
     }
 
     private static void Wifi(WindowData w, List<Finding> findings)

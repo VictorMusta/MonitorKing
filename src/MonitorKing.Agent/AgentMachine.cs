@@ -36,7 +36,7 @@ public sealed class AgentMachine : IMachineContext
             Live = true,
             Metrics = metrics,
             Processes = processes,
-            Events = Database.Events(now - 7L * 24 * 3600_000, now, 1000),
+            EventCounts = Database.EventCounts(now - 7L * 24 * 3600_000, now),
             Hangs = Database.Hangs(now - 24L * 3600_000, now),
             ActiveHangs = _host.Latest?.Hung.ToList() ?? new List<HungWindow>(),
             Sensors = _host.Latest?.Sensors.ToList() ?? new List<SensorReading>(),

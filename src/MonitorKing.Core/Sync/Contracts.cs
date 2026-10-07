@@ -21,7 +21,8 @@ public sealed record SealedName(string Pseudonym, string Sealed);
 
 /// <summary>
 /// Lot de données envoyé par l'agent. En mode « discret » (par défaut), les applications non Windows
-/// sont pseudonymisées et les titres de fenêtres comme les messages des événements sont retirés.
+/// sont pseudonymisées et les titres de fenêtres comme les messages des événements sont retirés
+/// (d'une erreur de stockage, il reste le périphérique visé : <see cref="EventItem.Device"/>).
 /// </summary>
 public sealed record UploadBatch(
     int Version,

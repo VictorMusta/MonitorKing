@@ -10,7 +10,8 @@ namespace MonitorKing.Agent;
 /// Ce qui peut quitter le PC. Mode « discret » par défaut :
 /// - les composants de Windows (installés sous C:\Windows, ou noyau/Defender) restent lisibles : ils servent au diagnostic ;
 /// - toute autre application devient « Appli 7F3A9C », un pseudonyme stable calculé avec une clé qui ne quitte jamais le PC ;
-/// - les titres de fenêtres et les messages des événements Windows (chemins, noms d'utilisateur) ne sont jamais envoyés.
+/// - les titres de fenêtres et les messages des événements Windows (chemins, noms d'utilisateur) ne sont jamais envoyés ;
+///   d'une erreur de stockage, seul part le périphérique visé (numéro du disque ou lettre du volume).
 /// L'utilisateur du PC voit tout en local et peut retrouver une application à partir de son pseudonyme.
 /// Il peut aussi, lui seul et depuis ce PC, tout partager pendant une durée limitée (mode « complet »).
 /// </summary>
@@ -158,18 +159,7 @@ public sealed class Privacy
             title = title[..(cut + 3)] + safe;
         }
 
-        return new EventItem
-        {
-            Ts = e.Ts,
-            Log = e.Log,
-            Provider = e.Provider,
-            EventId = e.EventId,
-            Level = e.Level,
-            Kind = e.Kind,
-            Title = title,
-            Message = null,
-            RecordId = e.RecordId,
-        };
+        return e.WithoutMessage(title);
     }
 
     public HangItem Outgoing(HangItem h) =>

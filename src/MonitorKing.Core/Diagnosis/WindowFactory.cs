@@ -14,6 +14,7 @@ public static class WindowFactory
             Live = false,
             Metrics = stats,
             Processes = db.TopProcesses(from, to),
+            EventCounts = db.EventCounts(from, to),
             Events = db.Events(from, to, 1000),
             Hangs = db.Hangs(from, to),
             Sensors = PeakTemperatures(stats, machine.Definitions),

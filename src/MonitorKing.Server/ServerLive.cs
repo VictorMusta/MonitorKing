@@ -61,7 +61,7 @@ public static class ServerLive
             Live = true,
             Metrics = stats,
             Processes = db.TopProcesses(from, to),
-            Events = db.Events(to - 7L * 24 * 3600_000, to, 1000),
+            EventCounts = db.EventCounts(to - 7L * 24 * 3600_000, to),
             Hangs = db.Hangs(to - 24L * 3600_000, to),
             ActiveHangs = ActiveHangs(machine, to),
             Sensors = Sensors(machine.Definitions, stats.ToDictionary(s => s.Key, s => s.Value.Last)),

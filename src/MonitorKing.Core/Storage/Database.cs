@@ -14,7 +14,8 @@ public sealed record AppInfo(string Name, string? Path, string? Description, boo
 public sealed class Database
 {
     private readonly string _connectionString;
-    private readonly ConcurrentDictionary<string, long> _metricIds = new();
+    // Identifiant de chaque métrique, et la définition enregistrée avec (null : reçue sans définition, celle de la base est gardée).
+    private readonly ConcurrentDictionary<string, (long Id, MetricDef? Def)> _metricIds = new();
 
     public Database(string path)
     {
@@ -91,6 +92,7 @@ public sealed class Database
                 title TEXT NOT NULL,
                 message TEXT,
                 record_id INTEGER NOT NULL,
+                device TEXT,
                 UNIQUE (log, record_id)
             );
             CREATE INDEX IF NOT EXISTS ix_event_ts ON event(ts);
@@ -135,25 +137,77 @@ public sealed class Database
         // Bases créées avant le réseau par application (v0.3) : on ajoute les colonnes, à 0 pour l'historique.
         AddColumnIfMissing(connection, "proc_sample", "net_send", "REAL NOT NULL DEFAULT 0");
         AddColumnIfMissing(connection, "proc_sample", "net_recv", "REAL NOT NULL DEFAULT 0");
+        AddEventDevice(connection);
     }
 
-    private static void AddColumnIfMissing(SqliteConnection connection, string table, string column, string definition)
+    private static bool AddColumnIfMissing(SqliteConnection connection, string table, string column, string definition, SqliteTransaction? transaction = null)
     {
         using (var check = connection.CreateCommand())
         {
+            check.Transaction = transaction;
             check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $column";
             check.Parameters.AddWithValue("$column", column);
-            if ((long)check.ExecuteScalar()! > 0) return;
+            if ((long)check.ExecuteScalar()! > 0) return false;
         }
 
         using var alter = connection.CreateCommand();
+        alter.Transaction = transaction;
         alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
         alter.ExecuteNonQuery();
+        return true;
     }
+
+    /// <summary>
+    /// Bases créées avant le périphérique des erreurs de stockage : la colonne est ajoutée puis remplie, une seule fois,
+    /// à partir des messages déjà enregistrés. Le tout dans une transaction, pour ne pas laisser une base à moitié reprise.
+    /// </summary>
+    private static void AddEventDevice(SqliteConnection connection)
+    {
+        using var transaction = connection.BeginTransaction();
+        if (!AddColumnIfMissing(connection, "event", "device", "TEXT", transaction)) return;
+
+        var devices = new List<(long Id, string Device)>();
+        using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT id, message FROM event WHERE kind = 'disk' AND message IS NOT NULL";
+            using var reader = read.ExecuteReader();
+            while (reader.Read())
+            {
+                if (StorageDevice.FromMessage(reader.GetString(1)) is { } found) devices.Add((reader.GetInt64(0), found));
+            }
+        }
+
+        using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = "UPDATE event SET device = $device WHERE id = $id";
+            var id = update.Parameters.Add("$id", SqliteType.Integer);
+            var device = update.Parameters.Add("$device", SqliteType.Text);
+            foreach (var (eventId, found) in devices)
+            {
+                id.Value = eventId;
+                device.Value = found;
+                update.ExecuteNonQuery();
+            }
+        }
+
+        transaction.Commit();
+    }
+
+    /// <summary>
+    /// Périphérique d'une erreur de stockage : celui que l'agent a transmis (mode discret, sans le message),
+    /// sinon celui que nomme le message. Les autres événements n'en ont pas.
+    /// </summary>
+    private static string? DeviceOf(EventItem e) =>
+        e.Kind != "disk" ? null : StorageDevice.Normalize(e.Device) ?? StorageDevice.FromMessage(e.Message);
 
     private long MetricId(SqliteConnection connection, SqliteTransaction? transaction, MetricDef def)
     {
-        if (_metricIds.TryGetValue(def.Key, out var id)) return id;
+        // Une définition déjà enregistrée telle quelle ne coûte rien. Si elle a changé (Windows renumérote les disques
+        // d'un démarrage à l'autre, un agent plus récent décrit mieux un disque), elle est réécrite : le diagnostic
+        // nomme les disques, et distingue un disque interne d'une clé USB, d'après ces libellés.
+        if (_metricIds.TryGetValue(def.Key, out var known) && known.Def == def) return known.Id;
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -166,8 +220,27 @@ public sealed class Database
         command.Parameters.AddWithValue("$unit", def.Unit);
         command.Parameters.AddWithValue("$grp", def.Group);
         command.Parameters.AddWithValue("$max", (object?)def.Max ?? DBNull.Value);
-        id = (long)command.ExecuteScalar()!;
-        _metricIds[def.Key] = id;
+        var id = (long)command.ExecuteScalar()!;
+        _metricIds[def.Key] = (id, def);
+        return id;
+    }
+
+    /// <summary>
+    /// Métrique reçue sans sa définition (mesures d'une exécution précédente de l'agent, pour un disque débranché depuis) :
+    /// la définition déjà enregistrée est gardée telle quelle ; à défaut, la clé sert de nom.
+    /// </summary>
+    private long MetricId(SqliteConnection connection, SqliteTransaction? transaction, string key)
+    {
+        if (_metricIds.TryGetValue(key, out var known)) return known.Id;
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO metric (key, label, unit, grp) VALUES ($key, $key, '', 'other') ON CONFLICT(key) DO NOTHING;
+            SELECT id FROM metric WHERE key = $key;
+            """;
+        command.Parameters.AddWithValue("$key", key);
+        var id = (long)command.ExecuteScalar()!;
+        _metricIds[key] = (id, null);
         return id;
     }
 
@@ -487,8 +560,8 @@ public sealed class Database
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT OR IGNORE INTO event (ts, log, provider, event_id, level, kind, title, message, record_id)
-            VALUES ($ts, $log, $provider, $eventId, $level, $kind, $title, $message, $recordId)
+            INSERT OR IGNORE INTO event (ts, log, provider, event_id, level, kind, title, message, record_id, device)
+            VALUES ($ts, $log, $provider, $eventId, $level, $kind, $title, $message, $recordId, $device)
             """;
         var ts = command.Parameters.Add("$ts", SqliteType.Integer);
         var log = command.Parameters.Add("$log", SqliteType.Text);
@@ -499,6 +572,7 @@ public sealed class Database
         var title = command.Parameters.Add("$title", SqliteType.Text);
         var message = command.Parameters.Add("$message", SqliteType.Text);
         var recordId = command.Parameters.Add("$recordId", SqliteType.Integer);
+        var device = command.Parameters.Add("$device", SqliteType.Text);
         var inserted = 0;
         foreach (var e in events)
         {
@@ -511,6 +585,7 @@ public sealed class Database
             title.Value = e.Title;
             message.Value = (object?)e.Message ?? DBNull.Value;
             recordId.Value = e.RecordId;
+            device.Value = (object?)DeviceOf(e) ?? DBNull.Value;
             inserted += command.ExecuteNonQuery();
         }
 
@@ -523,7 +598,7 @@ public sealed class Database
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT ts, log, provider, event_id, level, kind, title, message, record_id
+            SELECT ts, log, provider, event_id, level, kind, title, message, record_id, device
             FROM event WHERE ts >= $from AND ts <= $to ORDER BY ts DESC LIMIT $limit
             """;
         command.Parameters.AddWithValue("$from", from);
@@ -544,7 +619,36 @@ public sealed class Database
                 Title = reader.GetString(6),
                 Message = reader.IsDBNull(7) ? null : reader.GetString(7),
                 RecordId = reader.GetInt64(8),
+                Device = reader.IsDBNull(9) ? null : reader.GetString(9),
             });
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Signalements d'une période, comptés par nature, identifiant, titre et périphérique visé. Le diagnostic lit ces totaux
+    /// plutôt qu'une liste d'événements plafonnée : une rafale (des milliers d'erreurs d'une carte SD en quelques heures)
+    /// y prenait toutes les places, masquait le reste et s'affichait « 1000 fois ».
+    /// </summary>
+    public List<EventCount> EventCounts(long from, long to)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT kind, provider, event_id, title, device, COUNT(*), SUM(ts >= $lastDay), MAX(ts)
+            FROM event WHERE ts >= $from AND ts <= $to
+            GROUP BY kind, provider, event_id, title, device
+            """;
+        command.Parameters.AddWithValue("$from", from);
+        command.Parameters.AddWithValue("$to", to);
+        command.Parameters.AddWithValue("$lastDay", to - 24 * 3600_000L);
+        var list = new List<EventCount>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new EventCount(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetInt32(5), reader.GetInt32(6), reader.GetInt64(7)));
         }
 
         return list;
@@ -845,7 +949,7 @@ public sealed class Database
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, ts, log, provider, event_id, level, kind, title, message, record_id
+            SELECT id, ts, log, provider, event_id, level, kind, title, message, record_id, device
             FROM event WHERE id > $id ORDER BY id LIMIT $limit
             """;
         command.Parameters.AddWithValue("$id", id);
@@ -865,6 +969,7 @@ public sealed class Database
                 Title = reader.GetString(7),
                 Message = reader.IsDBNull(8) ? null : reader.GetString(8),
                 RecordId = reader.GetInt64(9),
+                Device = reader.IsDBNull(10) ? null : reader.GetString(10),
             }));
         }
 
@@ -946,7 +1051,7 @@ public sealed class Database
             var max = command.Parameters.Add("$max", SqliteType.Real);
             foreach (var s in samples)
             {
-                id.Value = MetricId(connection, transaction, defs.GetValueOrDefault(s.Key) ?? new MetricDef(s.Key, s.Key, "", "other"));
+                id.Value = defs.TryGetValue(s.Key, out var def) ? MetricId(connection, transaction, def) : MetricId(connection, transaction, s.Key);
                 ts.Value = s.Ts;
                 avg.Value = s.Avg;
                 max.Value = s.Max;
@@ -975,8 +1080,8 @@ public sealed class Database
         {
             command.Transaction = transaction;
             command.CommandText = """
-                INSERT OR IGNORE INTO event (ts, log, provider, event_id, level, kind, title, message, record_id)
-                VALUES ($ts, $log, $provider, $eventId, $level, $kind, $title, $message, $recordId)
+                INSERT OR IGNORE INTO event (ts, log, provider, event_id, level, kind, title, message, record_id, device)
+                VALUES ($ts, $log, $provider, $eventId, $level, $kind, $title, $message, $recordId, $device)
                 """;
             foreach (var e in events)
             {
@@ -990,6 +1095,7 @@ public sealed class Database
                 command.Parameters.AddWithValue("$title", e.Title);
                 command.Parameters.AddWithValue("$message", (object?)e.Message ?? DBNull.Value);
                 command.Parameters.AddWithValue("$recordId", e.RecordId);
+                command.Parameters.AddWithValue("$device", (object?)DeviceOf(e) ?? DBNull.Value);
                 command.ExecuteNonQuery();
             }
         }

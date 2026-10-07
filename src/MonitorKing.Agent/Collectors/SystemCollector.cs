@@ -200,7 +200,7 @@ public sealed class SystemCollector : ICollector
         }
     }
 
-    /// <summary>Modèle et type (HDD, SSD, NVMe) de chaque disque physique, par numéro.</summary>
+    /// <summary>Type (HDD, SSD, NVMe), bus externe éventuel (USB, carte SD) et modèle de chaque disque physique, par numéro.</summary>
     private static Dictionary<string, string> PhysicalDiskModels()
     {
         var models = new Dictionary<string, string>();
@@ -219,11 +219,18 @@ public sealed class SystemCollector : ICollector
                         (3, _) => "HDD",
                         (_, 17) => "SSD NVMe",
                         (4, _) => "SSD",
-                        (_, 7) => "USB",
+                        _ => null,
+                    };
+                    // Bus externe (USB, lecteur de cartes SD) : toujours annoncé, même quand le type du disque est connu.
+                    // Le diagnostic s'y fie pour ne pas prendre une clé USB ou une carte SD défaillante pour un disque interne.
+                    var external = bus switch
+                    {
+                        7 => StorageDevice.Usb,
+                        12 => StorageDevice.SdCard,
                         _ => null,
                     };
                     var friendly = disk["FriendlyName"]?.ToString()?.Trim();
-                    models[disk["DeviceId"]?.ToString() ?? ""] = string.Join(" ", new[] { type, friendly }.Where(s => !string.IsNullOrEmpty(s)));
+                    models[disk["DeviceId"]?.ToString() ?? ""] = string.Join(" ", new[] { type, external, friendly }.Where(s => !string.IsNullOrEmpty(s)));
                 }
             }
         }

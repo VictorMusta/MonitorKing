@@ -86,6 +86,33 @@ public sealed class EventItem
     public required string Title { get; init; }
     public string? Message { get; init; }
     public long RecordId { get; init; }
+    /// <summary>Erreur de stockage : le périphérique que Windows nomme dans son message (voir <see cref="StorageDevice"/>).</summary>
+    public string? Device { get; init; }
+
+    /// <summary>
+    /// Ce qui peut quitter le PC en mode discret : tout sauf le message de Windows (chemins, noms d'utilisateur).
+    /// Le périphérique d'une erreur de stockage reste : sans lui, le serveur prendrait une carte SD pour un disque interne.
+    /// </summary>
+    public EventItem WithoutMessage(string title) => new()
+    {
+        Ts = Ts,
+        Log = Log,
+        Provider = Provider,
+        EventId = EventId,
+        Level = Level,
+        Kind = Kind,
+        Title = title,
+        Message = null,
+        RecordId = RecordId,
+        Device = Device,
+    };
 }
+
+/// <summary>
+/// Signalements identiques de Windows, comptés par la base : même nature, même identifiant, même titre, même périphérique.
+/// </summary>
+/// <param name="LastDay">Ceux des dernières 24 h de la période.</param>
+/// <param name="Last">Instant du plus récent.</param>
+public sealed record EventCount(string Kind, string Provider, int EventId, string Title, string? Device, int Count, int LastDay, long Last);
 
 public sealed record HangItem(long Id, long Start, long? End, int Pid, string Process, string Title);

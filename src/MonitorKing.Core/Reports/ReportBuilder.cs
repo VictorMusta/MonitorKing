@@ -307,7 +307,9 @@ public sealed class ReportBuilder
             foreach (var e in window.Events.OrderBy(e => e.Ts).Take(60))
             {
                 var message = e.Message is null ? "" : " — " + Fmt.Cell(e.Message.Length > 400 ? e.Message[..400] + "…" : e.Message);
-                md.AppendLine($"- {Fmt.Time(e.Ts)} · **{Fmt.Cell(e.Title)}** ({e.Provider}, événement {e.EventId}){message}");
+                // Sans le message (mode discret), le périphérique d'une erreur de stockage est tout ce qui dit quel disque est visé.
+                var device = e.Device is null ? "" : $", {StorageDevice.Describe(e.Device)}";
+                md.AppendLine($"- {Fmt.Time(e.Ts)} · **{Fmt.Cell(e.Title)}** ({e.Provider}, événement {e.EventId}{device}){message}");
             }
         }
 

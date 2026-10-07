@@ -108,6 +108,10 @@ export function renderDiagnosis(d, { limit = 99, scope = '' } = {}) {
     ${hidden > 0 ? `<div class="muted" style="margin-top:8px">+ ${hidden} autre${hidden > 1 ? 's' : ''} constat${hidden > 1 ? 's' : ''}</div>` : ''}`;
 }
 
+// Erreur de stockage : le périphérique que Windows nomme (numéro de la Gestion des disques, ou lettre du volume).
+// En mode discret, c'est tout ce que le serveur reçoit du message.
+const storageDevice = (device) => (/^\d+$/.test(device) ? `disque n° ${device}` : `volume ${device}`);
+
 export function eventRow(e, { details = false } = {}) {
   const tone = e.level <= 2 ? 'sev-critical' : e.level === 3 ? 'sev-warning' : 'secondary';
   return `
@@ -115,7 +119,7 @@ export function eventRow(e, { details = false } = {}) {
       <span class="kind-dot ${tone}">${icon(KIND_ICONS[e.kind] ?? 'info', 14)}</span>
       <div>
         <b>${f.esc(reveal(e.title))}</b>
-        <div class="muted">${f.esc(KIND_LABELS[e.kind] ?? e.kind)} · ${f.esc(e.provider)} · événement ${e.eventId}</div>
+        <div class="muted">${f.esc(KIND_LABELS[e.kind] ?? e.kind)} · ${f.esc(e.provider)} · événement ${e.eventId}${e.device ? ` · ${f.esc(storageDevice(e.device))}` : ''}</div>
         ${details && e.message ? `<details><summary>Message de Windows</summary><pre>${f.esc(e.message)}</pre></details>` : ''}
       </div>
       <span class="when" title="${f.esc(f.dateTime(e.ts))}">${details ? f.time(e.ts) : f.ago(e.ts)}</span>

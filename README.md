@@ -37,7 +37,7 @@ Copier `deploy/agent/demarrage-windows.cmd` et `demarrage-windows.ps1` dans `out
 
 ## Confidentialité
 
-- **Mode discret (par défaut)** : tout le détail reste sur le PC. Vers le serveur partent les mesures, les composants de Windows en clair (ce qui est installé sous `C:\Windows`, Defender…) et les autres applications **sous pseudonyme** (« Appli 7F3A9C », calculé avec une clé qui ne quitte jamais le PC). Ni titres de fenêtres, ni nom du Wi-Fi, ni messages Windows (chemins, noms d'utilisateur).
+- **Mode discret (par défaut)** : tout le détail reste sur le PC. Vers le serveur partent les mesures, les composants de Windows en clair (ce qui est installé sous `C:\Windows`, Defender…) et les autres applications **sous pseudonyme** (« Appli 7F3A9C », calculé avec une clé qui ne quitte jamais le PC). Ni titres de fenêtres, ni nom du Wi-Fi, ni messages Windows (chemins, noms d'utilisateur) : d'une erreur de stockage, seul part le périphérique visé (numéro du disque ou lettre du lecteur), pour que le serveur ne prenne pas une carte SD défaillante pour un disque interne.
 - **Retrouver une application** : sur le PC, *Confidentialité et envoi* (pied de page) donne la correspondance pseudonyme → application.
 - **Clé de lecture (chiffrement de bout en bout)** : les vrais noms partent aussi, chiffrés en AES-256-GCM avec une clé qui reste sur le PC ; le serveur ne peut pas les lire. Si la personne donne sa clé (même fenêtre *Confidentialité et envoi*), le dashboard du serveur déchiffre les noms **dans le navigateur** (bouton *Noms masqués* en haut). Renouveler la clé retire l'accès.
 - **Partage complet** : activable seulement depuis le PC, pour 1 h ou 24 h, puis retour automatique au mode discret.
@@ -91,7 +91,7 @@ Le format du manifeste (`update-manifest.txt`, décrit dans `UpdateManifest.cs`)
 src/MonitorKing.Core/        moteur commun (sans Windows) : modèles, SQLite, diagnostic, rapports, contrat d'envoi,
                              refus des écritures venues d'un autre site (CSRF) sur les deux API
 src/MonitorKing.Updater/     mise à jour automatique de l'agent, sans dépendance : manifeste signé, téléchargement, installation
-tests/                       tests automatiques de la mise à jour et de la protection des API
+tests/                       tests automatiques de la mise à jour, de la protection des API et du diagnostic des erreurs de stockage
 src/MonitorKing.Agent/       Windows : collecteurs, journaux d'événements, mode discret, envoi vers le serveur
   Collectors/                CPU par cœur, processus (NtQuerySystemInformation), GPU, capteurs (LibreHardwareMonitor),
                              Wi-Fi, fenêtres « Ne répond pas »
@@ -107,6 +107,7 @@ scripts/                     publication d'une version signée de l'agent
 ## Limites connues
 
 - **Colonne « Disque / E/S »** : les compteurs par processus de Windows incluent le réseau ; une attribution disque exacte demanderait ETW. Le réseau seul a sa propre colonne (ETW, agent en administrateur ; sans ces droits, seul le débit total du PC est mesuré).
+- **Erreurs de stockage** : Windows désigne le périphérique fautif par un numéro de disque (ou une lettre de lecteur), et le diagnostic le rapproche du disque qui porte ce numéro au moment de l'analyse. Pour un support amovible, ce numéro passe au support suivant dès qu'on le rebranche : le diagnostic ne cite donc que le numéro. Pour un disque interne, il arrive (rarement) que Windows réordonne les disques d'un démarrage à l'autre : le disque nommé peut alors ne pas être celui des erreurs les plus anciennes.
 - **Agent lancé à la main** : pas encore de service Windows. Un service tournerait dans la session 0 et ne verrait pas les fenêtres gelées : il faudra un petit assistant dans la session de l'utilisateur.
 - **Mises à jour de l'agent** : une version téléchargée n'est lancée qu'au démarrage suivant de l'agent (ouverture de session), et l'installation d'origine reste sur le disque à côté de la version en cours (environ 110 Mo de plus). Les agents installés avant la 0.4.0 n'ont pas la mise à jour automatique : ils doivent être réinstallés une dernière fois à la main.
 

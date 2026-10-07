@@ -744,7 +744,7 @@ export async function showPrivacy(dialog, ctx) {
           <p><b>Mode actuel : ${state.mode === 'complet' ? `partage complet jusqu’à ${f.esc(f.time(state.fullUntil))}` : 'discret'}</b></p>
           <ul class="secondary" style="margin:6px 0 14px;padding-left:18px">
             <li>Tout le détail reste sur ce PC : tu vois tout ici.</li>
-            <li>En mode discret, ce qui part vers le serveur ne contient ni le nom de tes applications (remplacé par « Appli 7F3A9C »), ni les titres de fenêtres, ni le nom du Wi-Fi, ni les messages de Windows. Les composants de Windows restent lisibles.</li>
+            <li>En mode discret, ce qui part vers le serveur ne contient ni le nom de tes applications (remplacé par « Appli 7F3A9C »), ni les titres de fenêtres, ni le nom du Wi-Fi, ni les messages de Windows (d’une erreur de disque, seul part le numéro du disque ou la lettre du lecteur). Les composants de Windows restent lisibles.</li>
             <li>Seul ce PC peut activer le partage complet, et il s’arrête tout seul.</li>
           </ul>
           <p class="secondary">${server
